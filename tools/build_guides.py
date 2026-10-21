@@ -46,7 +46,8 @@ def page(path, title, desc, body, canonical, more=True, script=''):
 <a href="/">Home</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><a href="/about.html">About</a><a href="/sources.html">Data sources</a><a href="/api.html">API</a><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a><a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>
 <p style="margin:12px 0 0">Supplier Watch CZ is an independent service. It is not affiliated with the Czech Financial Administration, the Ministry of Justice or ČOI.</p>
 </div></footer>
-{script}</body>
+{script}<script src="/analytics.js" defer></script>
+</body>
 </html>
 """
 

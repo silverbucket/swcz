@@ -153,7 +153,7 @@ export class Accounts {
     limit(a) { return PLANS[a?.plan] ?? PLANS.free; }
 
     /** Create or refresh a pending signup. Returns { account, confirmToken }. */
-    signup(email, icos, { consentText, websites = {} }) {
+    signup(email, icos, { consentText, websites = {}, acq = null }) {
         const e = normEmail(email);
         let a = this.byEmail(e);
         if (!a) {
@@ -161,6 +161,7 @@ export class Accounts {
             this.db.accounts[a.id] = a;
         }
         if (!a.confirmed) { a.icos = icos.slice(0, this.limit(a)); a.websites = pickWebsites(a.icos, websites); } // confirmed users edit via the manage link
+        if (acq && !a.acq) a.acq = acq; // first touch only: how the account first found us (analytics.js parseAcq)
         a.pendingConsent = { text: consentText, at: new Date(this.now()).toISOString() };
         return { account: a, confirmToken: this.issue(a.id, 'confirm') };
     }
@@ -288,18 +289,24 @@ export class Accounts {
     }
 
     /** Apply a Stripe event; returns a description or null. */
+    /** The account a Stripe event is about, or null. */
+    stripeAccount(ev) {
+        const o = ev.data?.object ?? {};
+        if (ev.type === 'checkout.session.completed') return (o.client_reference_id && this.get(o.client_reference_id)) || this.byEmail(o.customer_details?.email ?? o.customer_email);
+        return o.customer ? this.byStripeCustomer(o.customer) : null;
+    }
     applyStripe(ev) {
         const o = ev.data?.object ?? {};
         const meta = (m) => (m?.plan && PLANS[m.plan] !== undefined ? m.plan : null);
         if (ev.type === 'checkout.session.completed') {
-            const a = (o.client_reference_id && this.get(o.client_reference_id)) || this.byEmail(o.customer_details?.email ?? o.customer_email);
+            const a = this.stripeAccount(ev);
             if (!a) return null;
             const replaced = a.subscription && o.subscription && a.subscription !== o.subscription ? a.subscription : null;
             a.plan = meta(o.metadata) ?? PLAN_BY_AMOUNT[o.amount_subtotal] ?? 'starter'; a.stripeCustomer = o.customer ?? a.stripeCustomer; a.subscription = o.subscription ?? null;
             return `${a.id} -> ${a.plan}${replaced ? ` (WARNING: previous subscription ${replaced} may still be billing)` : ''}`;
         }
         if (ev.type === 'customer.subscription.updated' || ev.type === 'customer.subscription.deleted') {
-            const a = this.byStripeCustomer(o.customer); if (!a) return null;
+            const a = this.stripeAccount(ev); if (!a) return null;
             if (a.subscription && o.id && o.id !== a.subscription) return null; // an old/other subscription must not change the plan
             const active = ev.type === 'customer.subscription.updated' && ['active', 'trialing', 'past_due'].includes(o.status);
             const price = o.items?.data?.[0]?.price;

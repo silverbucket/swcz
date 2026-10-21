@@ -70,7 +70,7 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
                 if (((r.changed && !r.firstRun) || r.newAlerts) && ownerOk()) {
                     const head = l.name ? `Client / Klient: ${l.name}\n\n` : '';
                     const what = r.changed && !r.firstRun ? ['changes detected', 'Zjištěny změny'] : ['warnings found', 'Nalezena upozornění'];
-                    await mailer.send({ to: a.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${a.unsubToken}`, subject: `Supplier Watch: ${what[0]}${l.name ? ` (${l.name})` : ''} / ${what[1]}`, text: `${head}${r.text}\n\nEdit your list: ${baseUrl}/#manage` });
+                    await mailer.send({ to: a.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${a.unsubToken}`, subject: `Supplier Watch: ${what[0]}${l.name ? ` (${l.name})` : ''} / ${what[1]}`, text: `${head}${r.text}\n\nEdit your list: ${baseUrl}/?mtm_campaign=alert-email#manage` });
                     for (const rc of l.recipients) if (recipientOk(rc)) await mailer.send({ to: rc.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${rc.unsubToken}`, subject: `Supplier Watch: ${what[0]} (${l.name}) / ${what[1]}`, text: `${head}${r.text}\n\nThese alerts were set up for you by ${a.email}.` });
                     summary.emailed++;
                 }

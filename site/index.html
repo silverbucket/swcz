@@ -70,7 +70,7 @@ footer a{color:var(--muted);margin-right:18px}
 </div></header>
 
 <main>
-<div class="hero"><div class="wrap">
+<div class="hero" data-track-content data-content-name="Hero"><div class="wrap">
  <h1>Know the day a Czech supplier becomes a risk</h1>
  <p class="sub">Every morning we run five checks on each of your Czech suppliers in the official registers. If anything changes, you get an alert in English, and every month a PDF report you can keep as proof that you checked.</p>
  <a class="btn" href="#signup">Start free with 5 suppliers</a>
@@ -91,7 +91,7 @@ footer a{color:var(--muted);margin-right:18px}
  <p class="note">Supplier Watch is an independent service, not affiliated with or endorsed by any of these authorities. If a register doesn't answer on a given day, we say so; we never report "all clear" for a check we couldn't run.</p>
 </div></section>
 
-<section id="sample"><div class="wrap">
+<section id="sample" data-track-content data-content-name="Sample alert"><div class="wrap">
  <h2>What an alert looks like</h2>
  <div class="grid g2" style="align-items:center">
   <div><p>You only hear from us when something changes. The alert names the supplier and the exact change, in English with the Czech wording alongside, so you can forward it to your accountant. Links go straight to the official record.</p><p class="note">Example with made-up data.</p><p><a class="btn ghost" href="/check.html">Try a free one-off check</a></p></div>
@@ -109,7 +109,7 @@ footer a{color:var(--muted);margin-right:18px}
  <p class="credit" style="color:var(--muted);font-size:14px;margin-top:18px">Risky e-shop data: <a href="https://coi.gov.cz/pro-spotrebitele/otevrena-data/licence-otevrenych-dat/" rel="noopener">Zdroj: Česká obchodní inspekce</a> (open data). Supplier Watch is an independent service, not affiliated with or endorsed by ČOI.</p>
 </div></section>
 
-<section id="pricing"><div class="wrap">
+<section id="pricing" data-track-content data-content-name="Pricing"><div class="wrap">
  <h2>Pricing</h2>
  <p class="pricing-lead">Same five checks, alerts and monthly PDF report on every plan. You choose how many suppliers.</p>
  <div class="grid g4">
@@ -121,7 +121,7 @@ footer a{color:var(--muted);margin-right:18px}
  <p class="fine">Start free; after you confirm your email you can upgrade with card payment through Stripe. Cancel anytime from your manage page. We are not a VAT payer, so prices are final.</p>
 </div></section>
 
-<section id="signup"><div class="wrap">
+<section id="signup" data-track-content data-content-name="Signup form"><div class="wrap">
  <h2>Start free</h2>
  <form class="signup" method="post" action="/signup">
   <label class="f" for="email">Work email</label>
@@ -152,7 +152,7 @@ footer a{color:var(--muted);margin-right:18px}
  </form>
 </div></section>
 
-<section id="faq"><div class="wrap">
+<section id="faq" data-track-content data-content-name="FAQ"><div class="wrap">
  <h2>FAQ</h2>
  <details><summary>Where does the data come from?</summary><p>Only from official public registers: ARES (the Czech business register), the VAT register of the Financial Administration (mojedane.gov.cz) and ISIR (the insolvency register), plus, for suppliers with a website, the risky e-shop list published as open data by the Czech Trade Inspection Authority (Zdroj: Česká obchodní inspekce). We report what they say at the time we check; we are not a government service and this is not tax advice.</p></details>
  <details><summary>What is in the monthly report?</summary><p>A PDF listing every check we ran during the month for each supplier: the time, and the result of each of the five checks (OK, alert, or not checked because a register was down), with details of any alert or change and the sources. It is emailed on the 1st and can be downloaded from your manage page. We keep the check history for 24 months.</p></details>
@@ -163,7 +163,7 @@ footer a{color:var(--muted);margin-right:18px}
  <details><summary>Are the alerts only in English?</summary><p>Alerts are written in English with the Czech wording alongside, so you can forward them to a Czech accountant.</p></details>
 </div></section>
 
-<section id="cs" class="cs" lang="cs"><div class="wrap">
+<section id="cs" class="cs" lang="cs" data-track-content data-content-name="Czech summary"><div class="wrap">
  <h2>Česky</h2>
  <p>Supplier Watch CZ každé ráno zkontroluje vaše dodavatele v oficiálních registrech (nespolehlivý plátce DPH, zveřejněné účty, insolvence, změny v ARES a rizikové weby podle ČOI) a pošle e-mail jen tehdy, když se něco změní. Každý měsíc navíc dostanete PDF protokol o všech kontrolách. Zdarma do 5 dodavatelů, 50 dodavatelů za 190 Kč měsíčně, 500 za 490 Kč měsíčně, tarif pro účetní (2 000 dodavatelů, samostatné seznamy pro klienty) za 990 Kč měsíčně. Dodavatele můžete nahrát i z CSV exportu z Pohody, Money S3 nebo Fakturoidu. <a href="#signup">Registrace</a> je výše.</p>
 </div></section>
@@ -175,5 +175,6 @@ footer a{color:var(--muted);margin-right:18px}
 </div></footer>
 <script src="/csvimport.js"></script>
 <script src="/suppliers.js"></script>
+<script src="/analytics.js" defer></script>
 </body>
 </html>

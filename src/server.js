@@ -15,13 +15,15 @@ import { PLAN_INFO } from './plans.js';
 import { historyMonths, validMonth } from './history.js';
 import { getReport, monthLabel } from './monthly.js';
 import { readStatus } from './canary.js';
+import { createTracker, stripeHits, parseAcq, analyticsData, ANALYTICS_SCRIPT } from './analytics.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const VERSION = (() => { try { return fs.readFileSync(path.join(ROOT, 'VERSION'), 'utf8').trim(); } catch { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version; } })();
 export const ACCOUNTANT_TEST_LINK = 'https://buy.stripe.com/test_14AdR92KNeiL730fys1ZS02';
 export const CONSENT_TEXT = 'I agree to the Terms and the Privacy Policy and consent to receiving supplier alert emails. / Souhlasím s Podmínkami a Zásadami ochrany osobních údajů a se zasíláním upozornění e-mailem.';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const page = (title, body) => `<!doctype html><html lang="en"><head><meta charset="utf-8">${title.startsWith('Check a Czech') ? '<meta name="description" content="Free check of a Czech company by IČO: unreliable VAT payer status, published bank accounts, insolvency (ISIR), ARES and the ČOI risky e-shop list. No account needed."><link rel="canonical" href="https://supplierwatch.cz/check.html">' : /^(terms|privacy)$/.test(title) ? '' : '<meta name="robots" content="noindex">'}<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} - Supplier Watch CZ</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem}textarea{width:100%}.sw-row{display:flex;gap:.5rem;margin:.3rem 0}.sw-row input{flex:1;padding:.3rem}.sw-bad{border-color:#c00!important;background:#fff4f4}.sw-err{color:#c00;font-size:.9em}.muted{color:#666}.sw-row input{min-width:0}.cta{display:inline-block;padding:.4rem .9rem;background:#0b5;color:#fff;border-radius:4px;text-decoration:none;margin:.2rem}table.t{border-collapse:collapse;width:100%;font-size:.92em}table.t td,table.t th{border-bottom:1px solid #ddd;padding:.3rem .4rem;text-align:left;vertical-align:top}.box{background:#f6f8fa;border-radius:8px;padding:.6rem 1rem;margin:1rem 0}code{background:#f1f3f5;padding:.1rem .3rem;border-radius:3px;word-break:break-all}</style></head><body><p><a href="/">Supplier Watch CZ</a></p>${body}</body></html>`;
+/** HTML page shell. `track` is page data for site/analytics.js: { userId, title, events, plansView, notFound }. */
+const page = (title, body, track = {}) => `<!doctype html><html lang="en"><head><meta charset="utf-8">${title.startsWith('Check a Czech') ? '<meta name="description" content="Free check of a Czech company by IČO: unreliable VAT payer status, published bank accounts, insolvency (ISIR), ARES and the ČOI risky e-shop list. No account needed."><link rel="canonical" href="https://supplierwatch.cz/check.html">' : /^(terms|privacy)$/.test(title) ? '' : '<meta name="robots" content="noindex">'}<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} - Supplier Watch CZ</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem}textarea{width:100%}.sw-row{display:flex;gap:.5rem;margin:.3rem 0}.sw-row input{flex:1;padding:.3rem}.sw-bad{border-color:#c00!important;background:#fff4f4}.sw-err{color:#c00;font-size:.9em}.muted{color:#666}.sw-row input{min-width:0}.cta{display:inline-block;padding:.4rem .9rem;background:#0b5;color:#fff;border-radius:4px;text-decoration:none;margin:.2rem}table.t{border-collapse:collapse;width:100%;font-size:.92em}table.t td,table.t th{border-bottom:1px solid #ddd;padding:.3rem .4rem;text-align:left;vertical-align:top}.box{background:#f6f8fa;border-radius:8px;padding:.6rem 1rem;margin:1rem 0}code{background:#f1f3f5;padding:.1rem .3rem;border-radius:3px;word-break:break-all}</style></head><body><p><a href="/">Supplier Watch CZ</a></p>${body}${analyticsData(track)}${ANALYTICS_SCRIPT}</body></html>`;
 const row = (ico = '', web = '') => `<div class="sw-row"><input name="ico" inputmode="numeric" maxlength="10" placeholder="IČO (8 digits)" aria-label="IČO" value="${esc(ico)}"><input name="web" placeholder="website (optional), e.g. firma.cz" aria-label="Website (optional)" value="${esc(web)}"><button type="button" class="sw-del" aria-label="Remove">×</button></div>`;
 /** Structured supplier rows (enhanced by /suppliers.js) with a collapsible paste box. Works without JS. */
 export function supplierFields(icos = [], websites = {}, limit = 5) {
@@ -39,8 +41,9 @@ function mdToHtml(md) { // tiny renderer, enough for the legal drafts
 
 export function createServer({
     env = process.env, dataDir = env.DATA_DIR || 'data', secret = env.STRIPE_WEBHOOK_SECRET,
-    baseUrl = (env.BASE_URL || 'https://supplierwatch.cz').replace(/\/$/, ''), mailer = createMailer(env), log = console.log, now = () => Date.now(), freeCheck, stripePortal,
+    baseUrl = (env.BASE_URL || 'https://supplierwatch.cz').replace(/\/$/, ''), mailer = createMailer(env), log = console.log, now = () => Date.now(), freeCheck, stripePortal, tracker,
 } = {}) {
+    const analytics = tracker ?? createTracker({ env, baseUrl, log, version: VERSION });
     const handleCheck = freeCheck ?? createFreeCheck({ env, dataDir });
     const accFile = path.join(dataDir, 'accounts.json');
     const links = { starter: env.STRIPE_LINK_STARTER || 'https://buy.stripe.com/test_3cIdR9dpr1vZ5YWbic1ZS00', pro: env.STRIPE_LINK_PRO || 'https://buy.stripe.com/test_bJe28rdprb6z0ECdqk1ZS01', accountant: env.STRIPE_LINK_ACCOUNTANT || ACCOUNTANT_TEST_LINK };
@@ -73,7 +76,7 @@ export function createServer({
         // A paid subscription changes plan in the Stripe portal; a new Checkout would start a second subscription.
         if (a.subscription) return canBill(a) ? `<h2>Upgrade</h2><form method="post" action="/manage">${hidden(t, { action: 'billing' })}<button>Change plan / Změnit tarif</button></form>` : '<h2>Upgrade</h2><p>To change your plan, write to <a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>.</p>';
         const label = { starter: 'Starter: 50 suppliers, 190 Kč / month', pro: 'Pro: 500 suppliers + API, 490 Kč / month', accountant: 'Accountant: 2,000 suppliers, client lists + API, 990 Kč / month' };
-        return `<h2>Upgrade</h2><p>${opts.map((p) => `<a class="cta" href="${esc(checkoutUrl(a, p))}">${label[p]}</a>`).join(' ')}</p>`;
+        return `<h2>Upgrade</h2><p>${opts.map((p) => `<a class="cta matomo_ignore" href="${esc(checkoutUrl(a, p))}" data-plan="${p}" data-plan-name="${esc(PLAN_INFO[p].name)}" data-price="${PLAN_INFO[p].priceKc}">${label[p]}</a>`).join(' ')}</p>`;
     };
     const reportsHtml = (a, t, clientId = null) => {
         const months = historyMonths(dataDir, a.id).slice(0, 24);
@@ -103,7 +106,9 @@ ${cl.length ? `<table class="t"><tr><th>Client</th><th>Suppliers</th><th>Extra r
         return `<h2>Delete account / Smazat účet</h2><p>This stops all checks and emails now, and ${DELETE_GRACE_DAYS} days later deletes your account, supplier and client lists, check history and monthly reports${a.cancelAt ? ` (or after your paid plan ends on ${day(new Date(a.cancelAt * 1000).toISOString())}, if later)` : ''}. Until then you can keep your account from this page. Download any monthly reports you need first. Invoices stay with our payment provider as the law requires.<br>Zastaví kontroly a e-maily a po ${DELETE_GRACE_DAYS} dnech smaže účet a všechna data. Do té doby můžete účet ponechat.</p>
 <form method="post" action="/manage">${hidden(t, { action: 'delete_account' })}<label><input type="checkbox" name="sure" value="1" required> I want to delete my account / Chci smazat účet</label> <button>Delete my account / Smazat účet</button></form>`;
     };
-    const manageHtml = (acc, a, t, note = '', { newKey } = {}) => {
+    const ev = (...e) => e; // [category, action, name?, value?] for site/analytics.js
+    const plansOffered = (a) => !a.subscription && ['starter', 'pro', 'accountant'].some((p) => PLAN_INFO[p].limit > PLAN_INFO[a.plan].limit && links[p]);
+    const manageHtml = (acc, a, t, note = '', { newKey, events = [] } = {}) => {
         const used = acc.total(a); const lim = acc.limit(a);
         const room = Math.max(a.icos.length, lim - acc.total(a, 'main'));
         return page('Your suppliers', `<h1>Your suppliers / Vaši dodavatelé</h1>${note}${pendingHtml(a, t)}
@@ -116,9 +121,9 @@ ${clientsHtml(acc, a, t)}
 ${reportsHtml(a, t)}
 ${keysHtml(a, t, newKey)}
 ${upgradeHtml(a, t)}
-${billingBtn(a, t)}${deletionHtml(acc, a, t)}<p class="muted">You can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.<br>Tarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.</p>`);
+${billingBtn(a, t)}${deletionHtml(acc, a, t)}<p class="muted">You can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.<br>Tarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.</p>`, { userId: a.id, plansView: plansOffered(a), events });
     };
-    const clientHtml = (acc, a, c, t, note = '') => {
+    const clientHtml = (acc, a, c, t, note = '', events = []) => {
         const room = Math.max(c.icos.length, acc.limit(a) - acc.total(a, c.id));
         return page(`Client ${c.name}`, `<p><a href="${esc(mlink(t))}">&larr; All lists</a></p><h1>${esc(c.name)}</h1>${note}
 <form method="post" action="/manage">${hidden(t, { action: 'save_client', client: c.id })}
@@ -127,7 +132,7 @@ ${supplierFields(c.icos, c.websites, room)}
 <p><label>Extra alert recipients for this client (optional, up to 5, comma separated). They get this client's alerts and monthly report, each with their own unsubscribe link:<br><textarea name="recipients" rows="2">${esc((c.recipients ?? []).map((r) => r.email).join(', '))}</textarea></label></p>
 <button>Save / Uložit</button></form>${SCRIPTS}
 ${reportsHtml(a, t, c.id)}
-<h2>Delete client</h2><form method="post" action="/manage" onsubmit="return confirm('Delete this client and its supplier list?')">${hidden(t, { action: 'delete_client', client: c.id })}<button>Delete ${esc(c.name)}</button></form>`);
+<h2>Delete client</h2><form method="post" action="/manage" onsubmit="return confirm('Delete this client and its supplier list?')">${hidden(t, { action: 'delete_client', client: c.id })}<button>Delete ${esc(c.name)}</button></form>`, { userId: a.id, title: 'Client list', events });
     };
 
     async function handle(req, res, body) {
@@ -152,36 +157,41 @@ ${reportsHtml(a, t, c.id)}
         if (req.method === 'POST' && P === '/stripe/webhook') {
             if (!verifySignature(body, req.headers['stripe-signature'], secret)) return send(400, '{"error":"bad signature"}', 'application/json');
             let ev; try { ev = JSON.parse(body); } catch { return send(400, '{"error":"bad json"}', 'application/json'); }
-            const acc = new Accounts(accFile, { now }); const r = acc.applyStripe(ev);
+            const acc = new Accounts(accFile, { now }); const who = acc.stripeAccount(ev); const before = who && { plan: who.plan, cancelAt: who.cancelAt };
+            const r = acc.applyStripe(ev);
             if (r) { acc.save(); log(`stripe ${ev.type}: ${r}`); } else if (ev.type === 'checkout.session.completed') log(`stripe checkout for unknown account ${ev.data?.object?.client_reference_id ?? ''}`);
+            // Invoices change nothing in the store; subscription events the store rejected (another subscription) are not tracked.
+            if (who && (r || ev.type.startsWith('invoice.'))) analytics.track(stripeHits(ev, who, before)).catch(() => {});
             return send(200, '{"received":true}', 'application/json');
         }
 
         if (req.method === 'POST' && P === '/signup') {
             const f = form(); const email = normEmail(f.email);
-            if (!validEmail(email)) return send(400, page('Error', '<p>Please enter a valid email. / Zadejte platný e-mail.</p><p><a href="/#signup">Back</a></p>'));
-            if (f.consent !== 'yes') return send(400, page('Error', '<p>Please tick the consent box. / Zaškrtněte prosím souhlas.</p><p><a href="/#signup">Back</a></p>'));
+            const failed = (why) => ({ events: [ev('Signup', 'signup-error', why)] });
+            if (!validEmail(email)) return send(400, page('Error', '<p>Please enter a valid email. / Zadejte platný e-mail.</p><p><a href="/#signup">Back</a></p>', failed('invalid email')));
+            if (f.consent !== 'yes') return send(400, page('Error', '<p>Please tick the consent box. / Zaškrtněte prosím souhlas.</p><p><a href="/#signup">Back</a></p>', failed('no consent')));
             if (f.fax) return send(200, page('Check your email', '<p>Check your email.</p>')); // honeypot
             if (!mailLimit.allow(clientIp(req))) return tooMany(send);
             const { icos, websites, invalid } = parseSupplierForm(new URLSearchParams(body));
-            if (!icos.length) return send(400, page('Error', `<p>No valid IČO found. / Nenalezeno žádné platné IČO.${invalid.length ? ` Invalid: ${esc(invalid.join(', '))}` : ''}</p><p><a href="/#signup">Back</a></p>`));
+            if (!icos.length) return send(400, page('Error', `<p>No valid IČO found. / Nenalezeno žádné platné IČO.${invalid.length ? ` Invalid: ${esc(invalid.join(', '))}` : ''}</p><p><a href="/#signup">Back</a></p>`, failed('no valid IČO')));
             const acc = new Accounts(accFile, { now });
-            const { account, confirmToken } = acc.signup(email, icos, { consentText: CONSENT_TEXT, websites }); acc.save();
+            const { account, confirmToken } = acc.signup(email, icos, { consentText: CONSENT_TEXT, websites, acq: parseAcq(f.acq) }); acc.save();
             if (!cooldown("signup", email)) {
                 await mailer.send({ to: email, unsubscribeUrl: unsubUrl(account), subject: 'Confirm your Supplier Watch sign-up / Potvrďte registraci',
-                    text: `Please confirm your email to start daily supplier checks (link valid 48 hours):\nPotvrďte prosím e-mail pro spuštění denních kontrol (odkaz platí 48 hodin):\n\n${baseUrl}/confirm?t=${confirmToken}\n\nYou can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.\nTarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.\n\nIf you did not sign up, ignore this email. / Pokud jste se neregistrovali, e-mail ignorujte.` });
+                    text: `Please confirm your email to start daily supplier checks (link valid 48 hours):\nPotvrďte prosím e-mail pro spuštění denních kontrol (odkaz platí 48 hodin):\n\n${baseUrl}/confirm?t=${confirmToken}&mtm_campaign=confirm-email\n\nYou can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.\nTarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.\n\nIf you did not sign up, ignore this email. / Pokud jste se neregistrovali, e-mail ignorujte.` });
             }
             const capped = icos.length > PLANS.free ? `<p>The free plan covers ${PLANS.free} suppliers; the first ${PLANS.free} were kept. You can upgrade after confirming.</p>` : '';
-            return send(200, page('Check your email', `<h1>Check your email / Zkontrolujte e-mail</h1><p>We sent a confirmation link to ${esc(email)}.</p>${capped}${invalid.length ? `<p>Ignored invalid IČO: ${esc(invalid.join(', '))}</p>` : ''}`));
+            return send(200, page('Check your email', `<h1>Check your email / Zkontrolujte e-mail</h1><p>We sent a confirmation link to ${esc(email)}.</p>${capped}${invalid.length ? `<p>Ignored invalid IČO: ${esc(invalid.join(', '))}</p>` : ''}`,
+                { userId: account.id, events: [ev('Signup', 'signup-email-sent', icos.length > PLANS.free ? 'over free limit' : 'within free limit', icos.length)] }));
         }
 
         if (P === '/confirm') { // only POST confirms: mail link scanners (GET, HEAD) must not use up the single-use link
             const t = url.searchParams.get('t') || form().t;
             if (req.method !== 'POST') return send(200, page('Confirm your email', `<h1>Confirm your email / Potvrďte e-mail</h1><form method="post" action="/confirm">${hidden(t)}<button>Confirm and start daily checks / Potvrdit</button></form>`));
             const acc = new Accounts(accFile, { now }); const a = acc.confirm(t);
-            if (!a) return send(400, page('Link expired', '<p>This link is invalid or expired. Sign up again on the <a href="/#signup">home page</a>.</p>'));
+            if (!a) return send(400, page('Link expired', '<p>This link is invalid or expired. Sign up again on the <a href="/#signup">home page</a>.</p>', { events: [ev('Signup', 'signup-error', 'confirm link expired')] }));
             const mt = acc.issue(a.id, 'manage'); acc.save();
-            return send(200, manageHtml(acc, a, mt, '<p><strong>Email confirmed. Daily checks start tomorrow at 06:30 Prague time. / E-mail potvrzen.</strong></p>'));
+            return send(200, manageHtml(acc, a, mt, '<p><strong>Email confirmed. Daily checks start tomorrow at 06:30 Prague time. / E-mail potvrzen.</strong></p>', { events: [ev('Signup', 'signup-confirmed', a.plan, a.icos.length)] }));
         }
 
         if (req.method === 'POST' && (P === '/billing' || (P === '/manage' && form().action === 'billing'))) { // billing posts to /manage (already proxied by nginx)
@@ -198,9 +208,9 @@ ${reportsHtml(a, t, c.id)}
             const email = normEmail(form().email); const acc = new Accounts(accFile, { now }); const a = acc.byEmail(email);
             if (a?.confirmed && !cooldown("manage", email)) {
                 const t = acc.issue(a.id, 'manage'); acc.save();
-                await mailer.send({ to: a.email, unsubscribeUrl: unsubUrl(a), subject: 'Edit your Supplier Watch list / Úprava seznamu', text: `Edit your supplier list (link valid 24 hours):\nÚprava seznamu dodavatelů (platí 24 hodin):\n\n${baseUrl}/manage?t=${t}` });
+                await mailer.send({ to: a.email, unsubscribeUrl: unsubUrl(a), subject: 'Edit your Supplier Watch list / Úprava seznamu', text: `Edit your supplier list (link valid 24 hours):\nÚprava seznamu dodavatelů (platí 24 hodin):\n\n${baseUrl}/manage?t=${t}&mtm_campaign=manage-link` });
             }
-            return send(200, page('Check your email', '<p>If that address has an account, we sent it a link. / Pokud účet existuje, poslali jsme odkaz.</p>'));
+            return send(200, page('Check your email', '<p>If that address has an account, we sent it a link. / Pokud účet existuje, poslali jsme odkaz.</p>', { events: [ev('Account', 'manage-link-requested')] }));
         }
 
         if (P === '/manage') {
@@ -223,7 +233,7 @@ ${reportsHtml(a, t, c.id)}
             const action = f.action || 'save';
             if (action === 'create_key') {
                 const r = acc.createApiKey(a, f.label); acc.save();
-                return send(r.error ? 400 : 200, manageHtml(acc, a, t, r.error ? `<p class="sw-err">${esc(r.error)}</p>` : '<p><strong>API key created.</strong></p>', { newKey: r.key }));
+                return send(r.error ? 400 : 200, manageHtml(acc, a, t, r.error ? `<p class="sw-err">${esc(r.error)}</p>` : '<p><strong>API key created.</strong></p>', { newKey: r.key, events: r.error ? [] : [ev('API', 'api-key-created', a.plan)] }));
             }
             if (action === 'delete_account') {
                 if (f.sure !== '1') return send(400, manageHtml(acc, a, t, '<p class="sw-err">Tick the box to confirm. / Potvrďte zaškrtnutím.</p>'));
@@ -233,13 +243,13 @@ ${reportsHtml(a, t, c.id)}
                     await mailer.send({ to: a.email, unsubscribeUrl: unsubUrl(a), subject: 'Your Supplier Watch account will be deleted / Účet bude smazán',
                         text: `Your Supplier Watch account (${a.email}) and all its data will be deleted on ${when}. Daily checks and emails have stopped.\nTo keep your account, request a link at ${baseUrl}/#manage and click "Keep my account".\n\nVáš účet Supplier Watch (${a.email}) a všechna jeho data budou smazány ${when}. Kontroly a e-maily jsou zastaveny.\nPokud chcete účet ponechat, vyžádejte si odkaz na ${baseUrl}/#manage a klikněte na „Ponechat účet“.` });
                 } catch (e) { log(`deletion mail failed for ${a.id}: ${e.message}`); }
-                return send(200, manageHtml(acc, a, t, '<p><strong>Deletion scheduled. We sent you a confirmation email. / Smazání naplánováno.</strong></p>'));
+                return send(200, manageHtml(acc, a, t, '<p><strong>Deletion scheduled. We sent you a confirmation email. / Smazání naplánováno.</strong></p>', { events: [ev('Account', 'account-delete-requested', a.plan)] }));
             }
-            if (action === 'keep_account') { acc.keep(a); acc.save(); log(`deletion cancelled: ${a.id}`); return send(200, manageHtml(acc, a, t, '<p><strong>Your account is kept; daily checks and emails resume. / Účet ponechán.</strong></p>')); }
+            if (action === 'keep_account') { acc.keep(a); acc.save(); log(`deletion cancelled: ${a.id}`); return send(200, manageHtml(acc, a, t, '<p><strong>Your account is kept; daily checks and emails resume. / Účet ponechán.</strong></p>', { events: [ev('Account', 'account-kept', a.plan)] })); }
             if (action === 'revoke_key') { const ok = acc.revokeApiKey(a, f.key); acc.save(); return send(ok ? 200 : 400, manageHtml(acc, a, t, ok ? '<p><strong>API key revoked.</strong></p>' : '<p class="sw-err">Key not found.</p>')); }
             if (action === 'add_client') {
                 const r = acc.addClient(a, f.name); if (r.error) return send(400, manageHtml(acc, a, t, `<p class="sw-err">${esc(r.error)}</p>`));
-                acc.save(); return send(200, clientHtml(acc, a, r.client, t, '<p><strong>Client added. Now add its suppliers.</strong></p>'));
+                acc.save(); return send(200, clientHtml(acc, a, r.client, t, '<p><strong>Client added. Now add its suppliers.</strong></p>', [ev('Clients', 'client-added', null, (a.clients ?? []).length)]));
             }
             if (action === 'delete_client') { const ok = acc.removeClient(a, f.client); acc.save(); return send(ok ? 200 : 404, manageHtml(acc, a, t, ok ? '<p><strong>Client deleted.</strong></p>' : '<p class="sw-err">No such client.</p>')); }
             const { icos, websites, invalid } = parseSupplierForm(new URLSearchParams(body));
@@ -249,13 +259,14 @@ ${reportsHtml(a, t, c.id)}
                 acc.renameClient(a, c.id, f.name);
                 const r = acc.setClientIcos(a, c.id, icos, websites); const rr = acc.setClientRecipients(a, c.id, f.recipients); acc.save();
                 const note = `<p><strong>Saved ${r.kept} suppliers.</strong>${r.dropped ? ` ${r.dropped} over your plan limit were not saved.` : ''}${invalid.length ? ` Ignored invalid: ${esc(invalid.join(', '))}` : ''}${rr.invalid.length ? ` Ignored invalid emails: ${esc(rr.invalid.join(', '))}` : ''}</p>`;
-                return send(200, clientHtml(acc, a, c, t, note));
+                return send(200, clientHtml(acc, a, c, t, note, [ev('Suppliers', 'suppliers-saved', 'client list', r.kept)]));
             }
             const r = acc.setIcos(a, icos, websites);
             if (f.resubscribe === '1') acc.keep(a);
             acc.save();
             const note = `<p><strong>Saved ${r.kept} suppliers.</strong>${r.dropped ? ` ${r.dropped} over your plan limit were not saved; upgrade below.` : ''}${invalid.length ? ` Ignored invalid: ${esc(invalid.join(', '))}` : ''}</p>`;
-            return send(200, manageHtml(acc, a, t, note));
+            // Hitting the plan limit is the upgrade moment: worth its own event.
+            return send(200, manageHtml(acc, a, t, note, { events: [ev('Suppliers', 'suppliers-saved', 'own list', r.kept), ...(r.dropped ? [ev('Suppliers', 'plan-limit-hit', a.plan, r.dropped)] : [])] }));
         }
 
         if (P === '/unsubscribe') { // GET/HEAD show a button (link scanners must not unsubscribe), POST does it (also RFC 8058 one-click)
@@ -263,9 +274,9 @@ ${reportsHtml(a, t, c.id)}
             if (req.method !== 'POST') return send(200, page('Unsubscribe', `<form method="post" action="/unsubscribe?t=${esc(t)}"><p>Stop all Supplier Watch emails? / Zastavit všechny e-maily?</p><button>Unsubscribe / Odhlásit</button></form>`));
             const acc = new Accounts(accFile, { now }); const a = acc.unsubscribe(t); if (a) acc.save();
             if (!a) return send(400, page('Unsubscribe', '<p>Unknown link.</p>'));
-            if (a.unsubToken !== t) return send(200, page('Unsubscribe', '<p>You\'re unsubscribed and won\'t get any more emails from this list. / Odhlášení proběhlo, další e-maily už nedostanete.</p>')); // a client's extra recipient
+            if (a.unsubToken !== t) return send(200, page('Unsubscribe', '<p>You\'re unsubscribed and won\'t get any more emails from this list. / Odhlášení proběhlo, další e-maily už nedostanete.</p>', { events: [ev('Account', 'unsubscribed', 'client recipient')] })); // a client's extra recipient
             const paid = acc.liveSubscription(a) ? '<p>You have a paid plan: unsubscribing does not cancel it. Cancel it with the Manage billing button on your manage page; your account is deleted after the plan ends. / Placený tarif tím zrušen není, zrušte ho tlačítkem Správa plateb.</p>' : '';
-            return send(200, page('Unsubscribe', `<p>You're unsubscribed and won't get any more emails. Your account and its data (supplier lists, check history, monthly reports) will be deleted on ${day(a.deleteAt)}. To keep your account, request a link on the <a href="/#manage">home page</a> and click "Keep my account".</p><p>Odhlášení proběhlo, další e-maily už nedostanete. Účet a jeho data budou smazány ${day(a.deleteAt)}. Pokud chcete účet ponechat, vyžádejte si odkaz na <a href="/#manage">úvodní stránce</a> a klikněte na „Ponechat účet“.</p>${paid}`));
+            return send(200, page('Unsubscribe', `<p>You're unsubscribed and won't get any more emails. Your account and its data (supplier lists, check history, monthly reports) will be deleted on ${day(a.deleteAt)}. To keep your account, request a link on the <a href="/#manage">home page</a> and click "Keep my account".</p><p>Odhlášení proběhlo, další e-maily už nedostanete. Účet a jeho data budou smazány ${day(a.deleteAt)}. Pokud chcete účet ponechat, vyžádejte si odkaz na <a href="/#manage">úvodní stránce</a> a klikněte na „Ponechat účet“.</p>${paid}`, { userId: a.id, events: [ev('Account', 'unsubscribed', a.plan)] }));
         }
 
         if (req.method === 'GET' && (P === '/terms.html' || P === '/privacy.html')) {
@@ -280,7 +291,7 @@ ${reportsHtml(a, t, c.id)}
                 return send(200, fs.readFileSync(f), types[path.extname(f)] || 'application/octet-stream');
             }
         }
-        return send(404, page('Not found', '<p>Not found.</p>'));
+        return send(404, page('Not found', '<p>Not found.</p>', { notFound: true }));
     }
 
     return http.createServer((req, res) => {

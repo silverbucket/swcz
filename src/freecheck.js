@@ -74,28 +74,32 @@ ${alerts.length ? `<p class="sw-err"><strong>Warnings:</strong><br>${alerts.map(
 <table>${rows.map(([k, val]) => `<tr><th style="text-align:left;vertical-align:top;padding:.2rem 1rem .2rem 0">${k}</th><td>${val}</td></tr>`).join('')}</table>${errs}
 ${stale ? `<p class="sw-err">A register did not answer just now, so this shows the last answer we have, from ${esc(new Date(r.checkedAt).toISOString().slice(0, 10))}. It may be out of date; check again later. / Registr právě neodpovídá, zobrazujeme poslední známá data, mohou být zastaralá.</p>` : ''}
 <p class="muted">Register data from ${esc(new Date(r.checkedAt).toISOString().slice(0, 16).replace('T', ' '))} UTC. Sources: ARES, Financial Administration VAT register, ISIR${coiUsed ? `, <a href="${COI_LICENCE_URL}">${COI_CREDIT}</a> (Supplier Watch is not affiliated with or endorsed by ČOI)` : ''}. Information only, not legal or tax advice.</p>
-<h2>Get an email when this changes</h2>
+<div data-track-content data-content-name="Free check: watch CTA"><h2>Get an email when this changes</h2>
 <p>A supplier can become an unreliable VAT payer, change its bank accounts or enter insolvency at any time. Supplier Watch checks your suppliers every morning and emails you only when something changes. Free for up to 5 suppliers.</p>
-<p><a class="cta" href="/#signup">Watch this supplier for free</a> <a href="/check.html">Check another IČO</a> · <a href="/guides/">Guides</a></p>`;
+<p><a class="cta" href="/#signup">Watch this supplier for free</a> <a href="/check.html">Check another IČO</a> · <a href="/guides/">Guides</a></p></div>`;
 }
 
 export function createFreeCheck({ env = process.env, dataDir, check = checkWatchlist, sources = REGISTER_SOURCES, loadCoi = loadCoiList, limiter = new RateLimiter({ perIp: Number(env.FREECHECK_PER_IP || 5), global: Number(env.FREECHECK_GLOBAL || 60) }), now = () => Date.now() } = {}) {
     let coiCache = null; let coiAt = 0; let lookups;
     const getCoi = async () => { if (!coiCache || now() - coiAt > 6 * 3600e3) { coiCache = await loadCoi({ dataDir }).catch(() => null); coiAt = now(); } return coiCache; };
+    // Page data for site/analytics.js. The IČO stays out of titles: a sole trader's IČO is personal data.
+    const failed = (why) => ({ title: 'Check a Czech supplier by IČO', events: [['Free check', 'free-check-error', why]] });
     return async function handleCheck(req, form, page) {
         if (req.method !== 'POST') return [200, page('Check a Czech supplier by IČO', checkForm())];
         const ico = normaliseIco(form.ico); const web = String(form.web ?? '').trim();
         if (form.fax) return [200, page('Check', checkForm())];
-        if (!ico || !isValidIco(ico)) return [400, page('Check a Czech supplier by IČO', checkForm({ ico: form.ico, web, error: 'That is not a valid IČO (8 digits with a checksum). / Neplatné IČO.' }))];
+        if (!ico || !isValidIco(ico)) return [400, page('Check a Czech supplier by IČO', checkForm({ ico: form.ico, web, error: 'That is not a valid IČO (8 digits with a checksum). / Neplatné IČO.' }), failed('invalid IČO'))];
         const website = web ? normalizeDomain(web) : null;
-        if (web && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(website)) return [400, page('Check a Czech supplier by IČO', checkForm({ ico, web, error: 'That website does not look like a domain, e.g. firma.cz.' }))];
+        if (web && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(website)) return [400, page('Check a Czech supplier by IČO', checkForm({ ico, web, error: 'That website does not look like a domain, e.g. firma.cz.' }), failed('invalid website'))];
         lookups ??= cachedSources(dataDir, { sources, now, staleFallback: true });
         const isirEnabled = env.ISIR_DISABLED !== '1';
         // Answers already in the cache cost the registers nothing, so they skip the limits.
-        if (!lookups.cached(ico, { isir: isirEnabled }) && !limiter.allow(clientIp(req))) return [429, page('Too many checks', `<p>Too many checks for now. Please try again in an hour, or <a href="/#signup">sign up free</a> to have up to 5 suppliers checked every day.</p>`)];
+        if (!lookups.cached(ico, { isir: isirEnabled }) && !limiter.allow(clientIp(req))) return [429, page('Too many checks', `<p>Too many checks for now. Please try again in an hour, or <a href="/#signup">sign up free</a> to have up to 5 suppliers checked every day.</p>`, failed('rate limited'))];
         const coi = website && env.COI_DISABLED !== '1' ? await getCoi() : undefined;
         const { rows } = await check([{ ico, website }], { isirEnabled, coi, sources: lookups });
         const asOf = lookups.asOf(ico, { isir: isirEnabled }); if (asOf) rows[0].checkedAt = new Date(asOf.at).toISOString(); // may be the morning's daily run
-        return [200, page(`Check result ${ico}`, renderResult(rows[0], { coiUsed: !!website && coi !== undefined, stale: asOf?.stale }))];
+        const n = currentAlerts(rows[0]).length;
+        return [200, page(`Check result ${ico}`, renderResult(rows[0], { coiUsed: !!website && coi !== undefined, stale: asOf?.stale }),
+            { title: 'Check result', events: [['Free check', 'free-check', n ? 'warnings' : 'clean', n]] })];
     };
 }
