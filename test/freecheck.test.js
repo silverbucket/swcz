@@ -179,3 +179,13 @@ test('static SEO files: guides, sitemap, robots, internal links', async () => {
         const st = await (await fetch(`${url}/check.html`)).text(); assert.match(st, /action="\/manage-link\?freecheck=1"/); assert.match(st, /canonical" href="https:\/\/supplierwatch.cz\/check.html/);
     });
 });
+
+test('review fixes: a failed VAT batch of several DIČs rejects once, with no unhandled rejections', async () => {
+    const unhandled = []; const h = (e) => unhandled.push(e); process.on('unhandledRejection', h);
+    try {
+        const lookups = cachedSources(tmpDir(), { sources: { ...registers(), dph: async () => { throw new Error('VAT down'); } } });
+        await assert.rejects(lookups.dph(['27082440', '45274649', '00006947']), /VAT down/);
+        await new Promise((r) => setTimeout(r, 20));
+        assert.deepEqual(unhandled, []);
+    } finally { process.off('unhandledRejection', h); }
+});

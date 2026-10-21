@@ -45,12 +45,12 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
     const processed = new Set();
     for (const { id } of acc.all()) {
         const a = acc.fresh(id); if (!a) continue;
-        // Register data is kept only for saved suppliers: snapshots of emptied or deleted lists go, and a paused
-        // account's snapshots are trimmed to the suppliers still saved (lists paused by a smaller plan keep theirs).
+        // Register data is kept only for saved suppliers: snapshots of emptied or deleted lists go, and every other
+        // snapshot is trimmed to the suppliers still saved on it (suppliers paused by a smaller plan keep theirs).
         const saved = { ...(a.icos?.length ? { [`${a.id}.json`]: a.icos } : {}), ...Object.fromEntries((a.clients ?? []).filter((c) => c.icos.length).map((c) => [`${a.id}--${c.id}.json`, c.icos])) };
         for (const f of stateFiles) {
             if (f !== `${a.id}.json` && !f.startsWith(`${a.id}--`)) continue;
-            if (!saved[f]) fs.rmSync(path.join(stateDir, f), { force: true }); else if (!active(a)) trimSnapshot(path.join(stateDir, f), saved[f]);
+            if (!saved[f]) fs.rmSync(path.join(stateDir, f), { force: true }); else trimSnapshot(path.join(stateDir, f), saved[f]);
         }
         if (!active(a)) continue;
         for (const l of acc.lists(a)) {

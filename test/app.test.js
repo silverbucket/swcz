@@ -346,3 +346,24 @@ test('review fixes: suppliers paused by a downgrade keep their snapshot, so a ch
     await runAll({ dataDir, mailer, check, log: () => {} });
     assert.equal(sent.length, 1); assert.match(sent[0].text, /Registered address changed/);
 });
+
+test('review fixes: a supplier removed from a client list paused by a downgrade leaves its snapshot; outbox mail goes with the account and after 30 days', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swrun-'));
+    const file = path.join(dataDir, 'accounts.json');
+    const acc = new Accounts(file); const { account, confirmToken } = acc.signup('cl@x.cz', [], { consentText: 'x' }); acc.confirm(confirmToken);
+    account.plan = 'accountant'; const { client } = acc.addClient(account, 'Klient'); acc.setClientIcos(account, client.id, ['27082440', '45274649']); acc.setClientRecipients(account, client.id, 'rc@x.cz'); acc.save();
+    const check = async (items) => ({ errors: {}, rows: items.map((i) => ({ ico: i.ico, sourceErrors: [], ares: { found: true, name: 'X' }, isir: { cases: [] } })) });
+    await runAll({ dataDir, mailer: { send: async () => {} }, check, log: () => {} });
+    const w = new Accounts(file); const wa = w.get(account.id); w.setClientIcos(wa, client.id, ['27082440']); wa.plan = 'pro'; w.save(); // client list paused, owner still active
+    await runAll({ dataDir, mailer: { send: async () => {} }, check, log: () => {} });
+    const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'state', `${account.id}--${client.id}.json`), 'utf8'));
+    assert.deepEqual(Object.keys(st.facts), ['27082440']); assert.deepEqual(Object.keys(st.latest), ['27082440']);
+
+    const { createMailer } = await import('../src/mailer.js'); const { pruneHistory } = await import('../src/history.js');
+    const m = createMailer({ DATA_DIR: dataDir, MAIL_DRY_RUN: '1' }); const pdf = [{ filename: 'r.pdf', content: '%PDF', contentType: 'application/pdf' }];
+    for (const to of ['cl@x.cz', 'rc@x.cz', 'other@x.cz']) await m.send({ to, subject: 's', text: 't', unsubscribeUrl: 'u', attachments: pdf });
+    new Accounts(file).erase(account.id);
+    const left = fs.readdirSync(m.outbox); assert.equal(left.length, 2, 'owner and recipient mail and attachments gone');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(m.outbox, left.find((f) => f.endsWith('.json'))), 'utf8')).to, 'other@x.cz');
+    pruneHistory(dataDir, 24, new Date(Date.now() + 31 * 864e5)); assert.deepEqual(fs.readdirSync(m.outbox), [], 'outbox mail goes after 30 days');
+});

@@ -63,8 +63,9 @@ export function cachedSources(dataDir, { sources = REGISTER_SOURCES, now = () =>
                     inFlight.set(k, batch.then((r) => { const v = { generated: r.generated, subject: r.subjects.get(dic) ?? null }; write('dph', dic, v); return v; }).finally(() => inFlight.delete(k)));
                 }
             }
-            const pending = missing.map((dic) => [dic, inFlight.get(`dph:${dic}`)]);
-            for (const [dic, p] of pending) { try { use(dic, await p); } catch (e) { use(dic, fallback('dph', dic, e)); } }
+            // Settle all before using any: a fallback that throws must not leave the other promises unhandled.
+            const settled = await Promise.allSettled(missing.map((dic) => inFlight.get(`dph:${dic}`)));
+            missing.forEach((dic, i) => use(dic, settled[i].status === 'fulfilled' ? settled[i].value : fallback('dph', dic, settled[i].reason)));
             return { generated, subjects };
         },
         /**

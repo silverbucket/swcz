@@ -187,10 +187,12 @@ export class Accounts {
     liveSubscription(a) { return Boolean(a.subscription && a.plan !== 'free'); }
     /** Delete an account now: its row, its tokens and all its files. Written immediately. */
     erase(id) {
-        deleteAccountFiles(path.dirname(this.file), id); // files first: if this fails the row stays, so it can be retried
+        deleteAccountFiles(path.dirname(this.file), id, this.addresses(this.fresh(id))); // files first: if this fails the row stays, so it can be retried
         tx(this.sql, () => { this.sql.prepare('DELETE FROM accounts WHERE id = ?').run(id); this.sql.prepare('DELETE FROM tokens WHERE account_id = ?').run(id); });
         delete this.db.accounts[id]; this.snap.delete(id);
     }
+    /** Every address this account mails: the owner and its clients' recipients. */
+    addresses(a) { return a ? [a.email, ...(a.clients ?? []).flatMap((c) => (c.recipients ?? []).map((r) => r.email))].filter(Boolean) : []; }
     /** The account as stored right now (not this instance's copy, which may be hours old in the daily run), or null. */
     fresh(id) { const r = this.sql.prepare('SELECT data FROM accounts WHERE id = ?').get(id); return r ? JSON.parse(r.data) : null; }
     /**
@@ -207,7 +209,7 @@ export class Accounts {
                 if (!a.deleteAt || a.deleteAt > nowIso) continue;
                 if (this.liveSubscription(a)) { out.waiting.push(a.id); continue; } // deleted once Stripe ends the plan
                 // Files first: if removing them fails, the row stays and tomorrow's run retries; other accounts go on.
-                try { deleteAccountFiles(path.dirname(this.file), a.id); } catch (e) { out.failed.push(`${a.id}: ${e.message}`); continue; }
+                try { deleteAccountFiles(path.dirname(this.file), a.id, this.addresses(a)); } catch (e) { out.failed.push(`${a.id}: ${e.message}`); continue; }
                 this.sql.prepare('DELETE FROM accounts WHERE id = ?').run(a.id); this.sql.prepare('DELETE FROM tokens WHERE account_id = ?').run(a.id);
                 out.deleted.push(a.id);
             }
