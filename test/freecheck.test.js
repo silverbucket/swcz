@@ -32,6 +32,7 @@ test('rate limiter: per IP and global caps, window expiry', () => {
     assert.ok(l.allow('a')); assert.ok(l.allow('a')); assert.equal(l.allow('a'), false);
     assert.ok(l.allow('b')); assert.equal(l.allow('c'), false, 'global cap');
     t = 1001; assert.ok(l.allow('a'));
+    assert.deepEqual([...l.hits.keys()], ['a'], 'expired IPs are forgotten');
     assert.equal(clientIp({ headers: { 'x-forwarded-for': '9.9.9.9, 127.0.0.1' } }), '9.9.9.9');
     assert.equal(clientIp({ headers: {}, socket: { remoteAddress: '::1' } }), '::1');
     assert.equal(clientIp({ headers: { 'x-forwarded-for': '6.6.6.6, 9.9.9.9' } }), '9.9.9.9', 'client-supplied entries are ignored');

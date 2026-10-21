@@ -17,7 +17,7 @@ export class RateLimiter {
         const mine = (this.hits.get(ip) ?? []).filter((x) => x > cut);
         if (mine.length >= this.perIp || this.all.length >= this.global) { this.hits.set(ip, mine); return false; }
         mine.push(t); this.hits.set(ip, mine); this.all.push(t);
-        if (this.hits.size > 10000) for (const [k, v] of this.hits) if (!v.some((x) => x > cut)) this.hits.delete(k);
+        for (const [k, v] of this.hits) if (!v.some((x) => x > cut)) this.hits.delete(k); // privacy policy: IPs kept at most one window
         return true;
     }
 }
