@@ -1,0 +1,107 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createServer } from '../src/server.js';
+import { Accounts, parseIcos } from '../src/accounts.js';
+import { runAll } from '../src/run.js';
+
+const SECRET = 'whsec_app';
+const sign = (b) => { const t = Math.floor(Date.now() / 1000); return `t=${t},v1=${crypto.createHmac('sha256', SECRET).update(`${t}.${b}`).digest('hex')}`; };
+const VALID = ['27082440', '09970207', '00006947', '45274649', '25596641', '26185610', '47114983'].filter((i) => parseIcos(i).icos.length);
+
+function setup() {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swapp-'));
+    const sent = [];
+    const mailer = { send: async (m) => { sent.push(m); } };
+    const srv = createServer({ dataDir, secret: SECRET, baseUrl: 'https://sw.test', mailer, log: () => {} });
+    return { dataDir, sent, mailer, srv };
+}
+const listen = (srv) => new Promise((r) => srv.listen(0, '127.0.0.1', () => r(`http://127.0.0.1:${srv.address().port}`)));
+const post = (url, data, headers = {}) => fetch(url, { method: 'POST', body: typeof data === 'string' ? data : new URLSearchParams(data), headers, redirect: 'manual' });
+const linkIn = (m, p) => m.text.match(new RegExp(`https://sw\\.test${p}\\?t=([\\w-]+)`))[1];
+
+test('IČO parsing', () => {
+    const r = parseIcos('27082440, 6947\n12345678 abc 27082440');
+    assert.deepEqual(r.icos, ['27082440', '00006947']);
+    assert.deepEqual(r.invalid, ['12345678', 'abc']);
+    assert.ok(VALID.length >= 6, 'need >5 valid fixtures');
+});
+
+test('signup -> double opt-in -> manage -> Stripe upgrade -> unsubscribe', async () => {
+    const { dataDir, sent, srv } = setup(); const url = await listen(srv);
+    try {
+        // site + legal pages served
+        assert.match(await (await fetch(`${url}/`)).text(), /action="\/signup"/);
+        assert.match(await (await fetch(`${url}/terms.html`)).text(), /Terms/);
+        assert.equal((await fetch(`${url}/../package.json`)).status, 404);
+        // consent required
+        assert.equal((await post(`${url}/signup`, { email: 'a@firma.cz', icos: VALID[0] })).status, 400);
+        assert.equal(sent.length, 0);
+        const r = await post(`${url}/signup`, { email: 'A@Firma.cz', icos: VALID.join('\n'), consent: 'yes' });
+        assert.equal(r.status, 200); assert.match(await r.text(), /first 5 were kept/);
+        assert.equal(sent.length, 1); assert.equal(sent[0].to, 'a@firma.cz'); assert.ok(sent[0].unsubscribeUrl);
+        let acc = new Accounts(path.join(dataDir, 'accounts.json'));
+        const a = acc.byEmail('a@firma.cz');
+        assert.equal(a.confirmed, false); assert.equal(a.icos.length, 5);
+        // not confirmed -> not checked
+        assert.equal((await runAll({ dataDir, mailer: { send: async () => assert.fail('mail') }, check: async () => assert.fail('check'), log: () => {} })).checked, 0);
+        // confirm (single use)
+        const ct = linkIn(sent[0], '/confirm');
+        const c = await fetch(`${url}/confirm?t=${ct}`); assert.equal(c.status, 200);
+        const html = await c.text(); assert.match(html, /client_reference_id=acc_/); assert.match(html, /prefilled_email=a%40firma.cz/);
+        assert.equal((await fetch(`${url}/confirm?t=${ct}`)).status, 400);
+        const mt = html.match(/name="t" value="([\w-]+)"/)[1];
+        // free plan: editing to 7 keeps 5
+        let m = await post(`${url}/manage`, { t: mt, icos: VALID.join(',') });
+        assert.match(await m.text(), /Saved 5 suppliers.*2 over your plan limit/s);
+        // Stripe checkout with client_reference_id -> starter
+        const ev = JSON.stringify({ type: 'checkout.session.completed', data: { object: { client_reference_id: a.id, customer: 'cus_X', subscription: 'sub_X', metadata: { plan: 'starter' }, customer_details: { email: 'other@x.cz' } } } });
+        assert.equal((await post(`${url}/stripe/webhook`, ev, { 'stripe-signature': 'bad' })).status, 400);
+        assert.equal((await post(`${url}/stripe/webhook`, ev, { 'stripe-signature': sign(ev) })).status, 200);
+        m = await post(`${url}/manage`, { t: mt, icos: VALID.join(',') }); assert.match(await m.text(), new RegExp(`Saved ${VALID.length} suppliers`));
+        // subscription cancelled -> free again; run caps at 5
+        const del = JSON.stringify({ type: 'customer.subscription.deleted', data: { object: { customer: 'cus_X', status: 'canceled' } } });
+        await post(`${url}/stripe/webhook`, del, { 'stripe-signature': sign(del) });
+        acc = new Accounts(path.join(dataDir, 'accounts.json')); assert.equal(acc.byEmail('a@firma.cz').plan, 'free');
+        // magic link for a known email; unknown gets the same answer and no mail
+        const n = sent.length;
+        await post(`${url}/manage-link`, { email: 'nobody@x.cz' }); assert.equal(sent.length, n);
+        await post(`${url}/manage-link`, { email: 'a@firma.cz' }); assert.equal(sent.length, n + 1);
+        assert.equal((await fetch(`${url}/manage?t=${linkIn(sent[n], '/manage')}`)).status, 200);
+        // unsubscribe: GET does nothing, POST does
+        const ut = acc.byEmail('a@firma.cz').unsubToken;
+        await fetch(`${url}/unsubscribe?t=${ut}`);
+        assert.equal(new Accounts(path.join(dataDir, 'accounts.json')).byEmail('a@firma.cz').unsubscribed, false);
+        assert.equal((await post(`${url}/unsubscribe?t=${ut}`, '')).status, 200);
+        assert.equal(new Accounts(path.join(dataDir, 'accounts.json')).byEmail('a@firma.cz').unsubscribed, true);
+    } finally { srv.close(); }
+});
+
+test('daily run: limit enforced, email only on change, never on first run', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swrun-'));
+    const acc = new Accounts(path.join(dataDir, 'accounts.json'));
+    const { account, confirmToken } = acc.signup('b@x.cz', VALID, { consentText: 'x' }); acc.confirm(confirmToken);
+    account.plan = 'starter'; acc.setIcos(account, VALID); account.plan = 'free'; acc.save(); // downgraded with 7 stored
+    let unreliable = 'NE'; let seen;
+    const check = async (items) => { seen = items.length; return { errors: {}, rows: items.map((i) => ({ ico: i.ico, label: null, expectedAccount: null, sourceErrors: [], ares: { name: 'X s.r.o.' }, vat: { unreliable, accounts: [], subjectType: 'PLATCE' }, isir: { cases: [] } })) }; };
+    const sent = []; const mailer = { send: async (m) => sent.push(m) };
+    await runAll({ dataDir, mailer, check, log: () => {} });
+    assert.equal(seen, 5); assert.equal(sent.length, 0); // first run = baseline
+    await runAll({ dataDir, mailer, check, log: () => {} }); assert.equal(sent.length, 0); // no change
+    unreliable = 'ANO';
+    await runAll({ dataDir, mailer, check, log: () => {} }); assert.equal(sent.length, 1);
+    assert.match(sent[0].unsubscribeUrl, /\/unsubscribe\?t=/);
+});
+
+test('mailer dry-run writes outbox with unsubscribe link and header', async () => {
+    const { createMailer } = await import('../src/mailer.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swmail-'));
+    const m = createMailer({ DATA_DIR: dir });
+    assert.equal(m.dry, true);
+    await m.send({ to: 'c@x.cz', subject: 's', text: 'hi', unsubscribeUrl: 'https://sw.test/unsubscribe?t=abc' });
+    const f = JSON.parse(fs.readFileSync(path.join(dir, 'outbox', fs.readdirSync(path.join(dir, 'outbox'))[0]), 'utf8'));
+    assert.match(f.text, /Unsubscribe.*t=abc/); assert.equal(f.headers['List-Unsubscribe'], '<https://sw.test/unsubscribe?t=abc>');
+});

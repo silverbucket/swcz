@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>API documentation | Supplier Watch CZ</title>
+<meta name="description" content="Read-only JSON API of Supplier Watch for Pro and Accountant plans: suppliers, latest check results and alerts.">
+<link rel="canonical" href="https://supplierwatch.cz/api.html">
+<style>:root{--ink:#14202b;--muted:#5b6875;--line:#e3e8ee;--bg:#f6f8fa;--brand:#0a7c5a}
+*{box-sizing:border-box}body{margin:0;font:17px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink)}
+a{color:var(--brand)}.wrap{max-width:760px;margin:0 auto;padding:0 20px}
+header.top{border-bottom:1px solid var(--line)}header.top .wrap{display:flex;justify-content:space-between;align-items:center;height:60px;max-width:1040px}
+.logo{font-weight:700;color:var(--ink);text-decoration:none}.logo span{color:var(--brand)}.top nav a{color:var(--muted);text-decoration:none;margin-left:18px;font-size:15px}
+h1{font-size:clamp(28px,4vw,40px);line-height:1.15;margin:40px 0 12px}h2{margin:36px 0 10px;font-size:24px}h3{margin:24px 0 6px}
+.meta,.muted{color:var(--muted);font-size:15px}.box{background:var(--bg);border-radius:12px;padding:18px 22px;margin:24px 0}
+.cta{display:inline-block;background:var(--brand);color:#fff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:16px}td,th{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;vertical-align:top}
+footer{border-top:1px solid var(--line);margin-top:56px;padding:28px 0;color:var(--muted);font-size:15px}footer a{color:var(--muted);margin-right:16px}
+pre{background:#f1f3f5;border-radius:8px;padding:12px 14px;overflow:auto;font-size:14px;line-height:1.45}code{background:#f1f3f5;padding:1px 4px;border-radius:3px;font-size:.92em}pre code{padding:0;background:none}
+.ok{color:#0a7c5a;font-weight:600}.bad{color:#b4441f;font-weight:600}
+@media (max-width:760px){.top nav{display:none}}</style>
+</head>
+<body>
+<header class="top"><div class="wrap"><a class="logo" href="/">Supplier Watch <span>CZ</span></a><nav><a href="/#checks">What we check</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><a href="/#pricing">Pricing</a></nav></div></header>
+<main class="wrap">
+<h1>Supplier Watch API</h1>
+<p>A read-only JSON API for the <strong>Pro</strong> and <strong>Accountant</strong> plans: your suppliers, their latest check results and your alerts, for your own systems (ERP, accounting, dashboards).</p>
+<h2>Authentication</h2>
+<p>Create a key on your manage page (API keys section). It is shown once; we store only a hash. Send it as a Bearer token:</p>
+<pre><code>curl -H "Authorization: Bearer sw_..." https://supplierwatch.cz/api/v1/suppliers</code></pre>
+<p>You can have up to 5 active keys and revoke any of them at any time. A revoked key stops working immediately.</p>
+<h2>Limits</h2>
+<p>60 requests per minute per key. Every response carries <code>X-RateLimit-Limit</code> and <code>X-RateLimit-Remaining</code>; over the limit you get <code>429</code> with <code>Retry-After</code> (seconds). Data change once a day (checks run at 06:30 Prague time), so polling more than a few times a day isn't useful.</p>
+<h2>Endpoints</h2>
+<table>
+<tr><th>Endpoint</th><th>Returns</th></tr>
+<tr><td><code>GET /api/v1/account</code></td><td>Your plan, supplier limit and counts</td></tr>
+<tr><td><code>GET /api/v1/suppliers</code></td><td>All suppliers with their latest results. Filters: <code>status=ok|alert|failed|pending</code>, <code>client=&lt;id&gt;</code> (or <code>main</code>). Paginated.</td></tr>
+<tr><td><code>GET /api/v1/suppliers/{ico}</code></td><td>One supplier (8-digit IČO). If the IČO is on several client lists, the others are in <code>also_in</code>; use <code>client=</code> to pick one.</td></tr>
+<tr><td><code>GET /api/v1/alerts?since=2026-10-01</code></td><td>Check results with an alert, a change or a failed source since the given ISO 8601 date or time (default: last 30 days, at most 24 months back), newest first. Filter: <code>client=</code>. Paginated.</td></tr>
+<tr><td><code>GET /api/v1/clients</code></td><td>Accountant plan: your client lists with supplier counts. Paginated.</td></tr>
+<tr><td><code>GET /api/v1/sources</code></td><td>Latest daily self-check of each data source</td></tr>
+</table>
+<h2>Pagination</h2>
+<p>List endpoints take <code>limit</code> (1 to 200, default 50) and <code>offset</code> (default 0) and return:</p>
+<pre><code>{ "data": [ ... ], "pagination": { "limit": 50, "offset": 0, "total": 312, "next_offset": 50 } }</code></pre>
+<p><code>next_offset</code> is <code>null</code> on the last page.</p>
+<h2>Supplier object</h2>
+<pre><code>{
+  "ico": "27082440",
+  "client": null,                      // or { "id": "cl_...", "name": "Novák s.r.o." }
+  "website": "alza.cz",
+  "name": "Alza.cz a.s.",
+  "last_checked": "2026-10-21T04:30:12.000Z",
+  "status": "ok",                      // ok | alert | failed | pending (not checked yet)
+  "checks": {
+    "ares":     { "status": "ok", "detail": "registered: ..." },
+    "vat":      { "status": "ok", "detail": "not unreliable (PLATCE_DPH)" },
+    "accounts": { "status": "ok", "detail": "3 published accounts" },
+    "isir":     { "status": "ok", "detail": "no proceedings" },
+    "coi":      { "status": "ok", "detail": "alza.cz not listed" }
+  },
+  "alerts": [],                        // e.g. "UNRELIABLE_VAT_PAYER", "INSOLVENCY_PROCEEDING"
+  "changes": []                        // e.g. { "type": "BANK_ACCOUNT_ADDED", "to": "123/0100" }
+}</code></pre>
+<p>Check status is <code>ok</code>, <code>alert</code>, <code>failed</code> (the source did not answer or failed our daily self-check, so <strong>no result is claimed</strong>), <code>not_run</code> (not applicable, e.g. no website) or <code>invalid</code>. Times are UTC.</p>
+<h2>Errors</h2>
+<p>Errors always look like this:</p>
+<pre><code>{ "error": { "code": "invalid_api_key", "message": "API key not recognised." } }</code></pre>
+<table>
+<tr><th>HTTP</th><th>code</th><th>Meaning</th></tr>
+<tr><td>400</td><td><code>invalid_parameter</code>, <code>invalid_ico</code></td><td>Bad query parameter or IČO</td></tr>
+<tr><td>401</td><td><code>missing_api_key</code>, <code>invalid_api_key</code>, <code>revoked_api_key</code></td><td>No key, unknown key or revoked key</td></tr>
+<tr><td>403</td><td><code>plan_required</code>, <code>account_not_confirmed</code></td><td>Your plan doesn't include the API (or client lists)</td></tr>
+<tr><td>404</td><td><code>not_found</code></td><td>Unknown endpoint, or the IČO/client isn't on your account</td></tr>
+<tr><td>405</td><td><code>method_not_allowed</code></td><td>The API is read-only; use GET</td></tr>
+<tr><td>429</td><td><code>rate_limited</code></td><td>Too many requests; wait <code>Retry-After</code> seconds</td></tr>
+</table>
+<p>Each key only ever sees its own account's data. Questions: <a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>.</p>
+
+</main>
+<footer><div class="wrap">
+<a href="/">Home</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><a href="/about.html">About</a><a href="/sources.html">Data sources</a><a href="/api.html">API</a><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a><a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>
+<p style="margin:12px 0 0">Supplier Watch CZ is an independent service. It is not affiliated with the Czech Financial Administration, the Ministry of Justice or ČOI.</p>
+</div></footer>
+</body>
+</html>

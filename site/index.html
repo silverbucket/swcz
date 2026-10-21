@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Supplier Watch CZ: daily risk checks of your Czech suppliers</title>
+<meta name="description" content="Five daily checks of your Czech suppliers in the official registers: unreliable VAT payer, published bank accounts, insolvency, ARES changes and the ČOI risky e-shop list. Alerts in English, monthly PDF report.">
+<style>
+:root{--ink:#14202b;--muted:#5b6875;--line:#e3e8ee;--bg:#f6f8fa;--brand:#0a7c5a;--brand-d:#07614a;--warn:#b4441f}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font:17px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:#fff}
+a{color:var(--brand)}
+.wrap{max-width:1040px;margin:0 auto;padding:0 20px}
+header.top{border-bottom:1px solid var(--line)}
+header.top .wrap{display:flex;justify-content:space-between;align-items:center;height:60px}
+.logo{font-weight:700;color:var(--ink);text-decoration:none;letter-spacing:-.01em}
+.logo span{color:var(--brand)}
+.top nav a{color:var(--muted);text-decoration:none;margin-left:18px;font-size:15px}
+.hero{padding:72px 0 64px;background:linear-gradient(180deg,#f2f8f5 0,#fff 100%)}
+.hero h1{font-size:clamp(32px,5vw,52px);line-height:1.1;letter-spacing:-.02em;margin:0 0 18px;max-width:16ch}
+.hero p.sub{font-size:clamp(18px,2.2vw,21px);color:var(--muted);max-width:40em;margin:0 0 30px}
+.btn{display:inline-block;background:var(--brand);color:#fff;text-decoration:none;font-weight:600;padding:14px 26px;border-radius:8px;border:0;font-size:17px;cursor:pointer}
+.btn:hover{background:var(--brand-d)}
+.btn.ghost{background:#fff;color:var(--brand);border:1.5px solid var(--brand)}
+.note{color:var(--muted);font-size:15px;margin-top:12px}
+section{padding:64px 0;border-top:1px solid var(--line)}
+h2{font-size:clamp(26px,3.2vw,34px);letter-spacing:-.015em;margin:0 0 28px}
+.grid{display:grid;gap:20px}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+@media (max-width:900px){.g4{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:760px){.g3,.g2,.g4{grid-template-columns:1fr}.top nav{display:none}.hero{padding:48px 0 44px}section{padding:48px 0}}
+.step{padding:4px 0}
+.num{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:#e4f3ec;color:var(--brand);font-weight:700;margin-bottom:10px}
+.step h3,.check h3{margin:0 0 6px;font-size:19px}
+.step p,.check p{margin:0;color:var(--muted)}
+.check{background:var(--bg);border-radius:12px;padding:22px}
+.pricing-lead{font-weight:600;margin:-12px 0 24px}
+.card{border:1px solid var(--line);border-radius:14px;padding:28px;text-align:center;background:#fff}
+.card.mid{border:2px solid var(--brand)}
+.card h3{margin:0;font-size:18px;color:var(--muted);font-weight:600}
+.card .n{font-size:44px;font-weight:700;letter-spacing:-.02em;margin:10px 0 0}
+.card .n small{font-size:17px;font-weight:500;color:var(--muted)}
+.card .p{font-size:20px;margin:6px 0 0}
+.fine{color:var(--muted);font-size:15px;margin-top:20px}
+form.signup{background:var(--bg);border-radius:14px;padding:28px;max-width:640px}
+label.f{display:block;font-weight:600;margin:0 0 6px}
+input[type=email],textarea{width:100%;font:inherit;padding:12px 14px;border:1px solid #c9d2dc;border-radius:8px;background:#fff}
+textarea{min-height:130px;resize:vertical}
+.sw-row{display:flex;gap:8px;margin:0 0 8px}.sw-row input{flex:1 1 0;min-width:0;font:inherit;padding:10px 12px;border:1px solid #c9d2dc;border-radius:8px;background:#fff}.sw-row input[name=ico]{flex:0 0 11em}.sw-del{flex:none;width:42px;border:1px solid #c9d2dc;border-radius:8px;background:#fff;font-size:20px;cursor:pointer}.sw-bad{border-color:#c00!important;background:#fff4f4!important}.sw-err{color:#c00;font-size:14px;margin:4px 0 8px;min-height:1px}.sw-add:disabled{opacity:.5}.sw-paste{border:0;padding:8px 0 16px}.sw-paste summary{font-size:15px}
+.hint{color:var(--muted);font-size:14px;margin:4px 0 18px}
+.consent{display:flex;gap:10px;align-items:flex-start;font-size:15px;margin:4px 0 20px}
+.consent input{margin-top:5px;width:18px;height:18px;flex:none}
+.inline{display:flex;gap:10px;flex-wrap:wrap;max-width:640px}
+.inline input{flex:1 1 240px}
+details{border-bottom:1px solid var(--line);padding:16px 0}
+summary{font-weight:600;cursor:pointer;font-size:18px}
+details p{color:var(--muted);margin:10px 0 0}
+.cs p{color:var(--muted);max-width:44em}
+footer{border-top:1px solid var(--line);padding:32px 0;color:var(--muted);font-size:15px}
+footer a{color:var(--muted);margin-right:18px}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+ <a class="logo" href="/">Supplier Watch <span>CZ</span></a>
+ <nav><a href="#checks">What we check</a><a href="/check.html">Free IČO check</a><a href="/guides/">Guides</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a><a href="#cs" lang="cs">Česky</a></nav>
+</div></header>
+
+<main>
+<div class="hero"><div class="wrap">
+ <h1>Know the day a Czech supplier becomes a risk</h1>
+ <p class="sub">Every morning we run five checks on each of your Czech suppliers in the official registers. If anything changes, you get an alert in English, and every month a PDF report you can keep as proof that you checked.</p>
+ <a class="btn" href="#signup">Start free with 5 suppliers</a>
+ <p class="note">No card needed for the free plan.</p>
+</div></div>
+
+<section id="checks"><div class="wrap">
+ <h2>What we check</h2>
+ <p class="pricing-lead" style="font-weight:400;color:var(--muted)">Five checks, every morning, for every supplier on your list. All from official public sources.</p>
+ <div class="grid g2">
+  <div class="check"><h3>1. Unreliable VAT payer</h3><p>Whether the tax office has published the supplier as an unreliable VAT payer. If you pay one, you can be made to pay its unpaid VAT (§109 VAT Act). <a href="https://adisspr.mfcr.cz/dpr/DphReg" rel="noopener">Source: VAT register, Financial Administration</a></p></div>
+  <div class="check"><h3>2. Published bank accounts</h3><p>Which bank accounts the supplier has published to the tax office, and when they change. Paying to an account that isn't published can also make you liable for its VAT. <a href="https://adisspr.mfcr.cz/dpr/DphReg" rel="noopener">Source: VAT register, Financial Administration</a></p></div>
+  <div class="check"><h3>3. Insolvency (ISIR)</h3><p>Whether the supplier is in insolvency proceedings. It's an early warning that deliveries, warranties or prepayments are at risk. <a href="https://isir.justice.cz/" rel="noopener">Source: Insolvency Register, Ministry of Justice</a></p></div>
+  <div class="check"><h3>4. Business register changes (ARES)</h3><p>New registered address, a change of name, owners or statutory body as reflected in the register, liquidation or dissolution. Any of these can mean you're dealing with a different or ending company. <a href="https://ares.gov.cz/" rel="noopener">Source: ARES, Ministry of Finance</a></p></div>
+  <div class="check"><h3>5. Risky websites (ČOI)</h3><p>Optional: add a supplier's website and we tell you if it appears on, or is removed from, the Czech Trade Inspection's list of risky e-shops. <a href="https://www.coi.gov.cz/pro-spotrebitele/rizikove-e-shopy/" rel="noopener">Source: Česká obchodní inspekce</a> (open data, <a href="https://coi.gov.cz/pro-spotrebitele/otevrena-data/licence-otevrenych-dat/" rel="noopener">licence</a>)</p></div>
+  <div class="check"><h3>Monthly PDF report</h3><p>On the 1st of each month you get a PDF listing every check we ran, per supplier, with the result and time. Keep it as evidence that you checked your suppliers. <a href="/sources.html">How each source is used</a></p></div>
+ </div>
+ <p class="note">Supplier Watch is an independent service, not affiliated with or endorsed by any of these authorities. If a register doesn't answer on a given day, we say so; we never report "all clear" for a check we couldn't run.</p>
+</div></section>
+
+<section id="sample"><div class="wrap">
+ <h2>What an alert looks like</h2>
+ <div class="grid g2" style="align-items:center">
+  <div><p>You only hear from us when something changes. The alert names the supplier and the exact change, in English with the Czech wording alongside, so you can forward it to your accountant. Links go straight to the official record.</p><p class="note">Example with made-up data.</p><p><a class="btn ghost" href="/check.html">Try a free one-off check</a></p></div>
+  <div style="text-align:center"><img src="/sample-alert.png" width="420" height="539" alt="Sample Supplier Watch alert email on a phone: a supplier was published as an unreliable VAT payer and a new bank account appeared" style="max-width:100%;height:auto;width:420px;border:1px solid var(--line);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.08)"></div>
+ </div>
+</div></section>
+
+<section id="how"><div class="wrap">
+ <h2>How it works</h2>
+ <div class="grid g3">
+  <div class="step"><div class="num">1</div><h3>Add your suppliers</h3><p>Enter your suppliers' company ID numbers (IČO), or import a CSV export from Pohoda, Money S3 or Fakturoid.</p></div>
+  <div class="step"><div class="num">2</div><h3>We check every morning</h3><p>Each day we look up every supplier in the official public registers.</p></div>
+  <div class="step"><div class="num">3</div><h3>Email only on change</h3><p>No daily noise. You hear from us only when something changes.</p></div>
+ </div>
+ <p class="credit" style="color:var(--muted);font-size:14px;margin-top:18px">Risky e-shop data: <a href="https://coi.gov.cz/pro-spotrebitele/otevrena-data/licence-otevrenych-dat/" rel="noopener">Zdroj: Česká obchodní inspekce</a> (open data). Supplier Watch is an independent service, not affiliated with or endorsed by ČOI.</p>
+</div></section>
+
+<section id="pricing"><div class="wrap">
+ <h2>Pricing</h2>
+ <p class="pricing-lead">Same five checks, alerts and monthly PDF report on every plan. You choose how many suppliers.</p>
+ <div class="grid g4">
+  <div class="card"><h3>Free</h3><p class="n">5 <small>suppliers</small></p><p class="p">0 Kč</p></div>
+  <div class="card mid"><h3>Starter</h3><p class="n">50 <small>suppliers</small></p><p class="p">190 Kč / month</p></div>
+  <div class="card"><h3>Pro</h3><p class="n">500 <small>suppliers</small></p><p class="p">490 Kč / month</p><p class="fine" style="margin-top:8px">+ read-only <a href="/api.html">JSON API</a></p></div>
+  <div class="card"><h3>Accountant</h3><p class="n">2,000 <small>suppliers</small></p><p class="p">990 Kč / month</p><p class="fine" style="margin-top:8px">Separate lists for each client, own alert recipients, <a href="/api.html">API</a></p></div>
+ </div>
+ <p class="fine">Start free; after you confirm your email you can upgrade with card payment through Stripe. Cancel anytime from your manage page. We are not a VAT payer, so prices are final.</p>
+</div></section>
+
+<section id="signup"><div class="wrap">
+ <h2>Start free</h2>
+ <form class="signup" method="post" action="/signup">
+  <label class="f" for="email">Work email</label>
+  <input id="email" type="email" name="email" required maxlength="254" autocomplete="email">
+  <p class="hint">We send a confirmation link first.</p>
+  <div class="sw-sup" data-limit="5">
+  <p class="f">Suppliers</p>
+  <div class="sw-rows">
+   <div class="sw-row"><input name="ico" inputmode="numeric" maxlength="10" placeholder="IČO (8 digits)" aria-label="Supplier IČO"><input name="web" placeholder="website (optional), e.g. firma.cz" aria-label="Supplier website (optional)"><button type="button" class="sw-del" aria-label="Remove supplier">×</button></div>
+   <div class="sw-row"><input name="ico" inputmode="numeric" maxlength="10" placeholder="IČO (8 digits)" aria-label="Supplier IČO"><input name="web" placeholder="website (optional), e.g. firma.cz" aria-label="Supplier website (optional)"><button type="button" class="sw-del" aria-label="Remove supplier">×</button></div>
+   <div class="sw-row"><input name="ico" inputmode="numeric" maxlength="10" placeholder="IČO (8 digits)" aria-label="Supplier IČO"><input name="web" placeholder="website (optional), e.g. firma.cz" aria-label="Supplier website (optional)"><button type="button" class="sw-del" aria-label="Remove supplier">×</button></div>
+  </div>
+  <p class="sw-err" role="alert"></p>
+  <button type="button" class="btn ghost sw-add">+ Add supplier</button> <span class="sw-count hint"></span>
+  <p class="hint">Enter each supplier's 8-digit IČO and, optionally, its website (we check it against the ČOI risky e-shop list). Up to 5 on the free plan.</p>
+  <p class="hint"><label>Import a CSV file: <input type="file" class="sw-file" accept=".csv,.txt,text/csv"></label><br>Exports from Pohoda (Adresář), Money S3 (Adresář) and Fakturoid (Kontakty) are recognised, or any CSV with an "IČO" column and an optional "Web" column. UTF-8 or Windows-1250, comma or semicolon. <span class="sw-csvinfo" role="status"></span></p>
+  <details class="sw-paste"><summary>Paste a list instead</summary><textarea id="icos" name="icos" placeholder="27082440 firma.cz&#10;45274649"></textarea><p class="hint">One IČO per line, optionally followed by the website, or paste a whole CSV export with its header row. <button type="button" class="btn ghost sw-parse">Add to rows</button></p></details>
+  </div>
+  <input type="text" name="fax" tabindex="-1" autocomplete="off" style="display:none" aria-hidden="true">
+  <label class="consent"><input type="checkbox" name="consent" value="yes" required><span>I agree to the <a href="terms.html">Terms</a> and the <a href="privacy.html">Privacy Policy</a> and consent to receiving supplier alert emails.</span></label>
+  <button class="btn">Start checking</button>
+ </form>
+
+ <h3 id="manage" style="margin:40px 0 12px">Already signed up?</h3>
+ <form class="inline" method="post" action="/manage-link">
+  <input type="email" name="email" required placeholder="your email" aria-label="Your email">
+  <button class="btn ghost">Email me a link to edit my list</button>
+ </form>
+</div></section>
+
+<section id="faq"><div class="wrap">
+ <h2>FAQ</h2>
+ <details><summary>Where does the data come from?</summary><p>Only from official public registers: ARES (the Czech business register), the VAT register of the Financial Administration (mojedane.gov.cz) and ISIR (the insolvency register), plus, for suppliers with a website, the risky e-shop list published as open data by the Czech Trade Inspection Authority (Zdroj: Česká obchodní inspekce). We report what they say at the time we check; we are not a government service and this is not tax advice.</p></details>
+ <details><summary>What is in the monthly report?</summary><p>A PDF listing every check we ran during the month for each supplier: the time, and the result of each of the five checks (OK, alert, or not checked because a register was down), with details of any alert or change and the sources. It is emailed on the 1st and can be downloaded from your manage page. We keep the check history for 24 months.</p></details>
+ <details><summary>I'm an accountant. Can I watch suppliers for several clients?</summary><p>Yes. The Accountant plan (990 Kč / month, 2,000 suppliers in total) gives one login with a separate supplier list for each client. Each client list can have its own alert recipients and its own monthly report.</p></details>
+ <details><summary>Is there an API?</summary><p>Pro and Accountant plans include a read-only JSON API with your suppliers, their latest check results and alerts. See the <a href="/api.html">API documentation</a>.</p></details>
+ <details><summary>How do I cancel?</summary><p>You can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan. To stop all emails, click the unsubscribe link at the bottom of any email.</p></details>
+ <details><summary>What do you do with my data?</summary><p>We store your email address and your supplier list only to run the checks and send you alerts. No tracking cookies and no ads. Card payments are handled by Stripe; we never see your card number. See the <a href="privacy.html">Privacy Policy</a>.</p></details>
+ <details><summary>Are the alerts only in English?</summary><p>Alerts are written in English with the Czech wording alongside, so you can forward them to a Czech accountant.</p></details>
+</div></section>
+
+<section id="cs" class="cs" lang="cs"><div class="wrap">
+ <h2>Česky</h2>
+ <p>Supplier Watch CZ každé ráno zkontroluje vaše dodavatele v oficiálních registrech (nespolehlivý plátce DPH, zveřejněné účty, insolvence, změny v ARES a rizikové weby podle ČOI) a pošle e-mail jen tehdy, když se něco změní. Každý měsíc navíc dostanete PDF protokol o všech kontrolách. Zdarma do 5 dodavatelů, 50 dodavatelů za 190 Kč měsíčně, 500 za 490 Kč měsíčně, tarif pro účetní (2 000 dodavatelů, samostatné seznamy pro klienty) za 990 Kč měsíčně. Dodavatele můžete nahrát i z CSV exportu z Pohody, Money S3 nebo Fakturoidu. <a href="#signup">Registrace</a> je výše.</p>
+</div></section>
+</main>
+
+<footer><div class="wrap">
+ <a href="/check.html">Free IČO check</a><a href="/guides/">Guides</a><a href="/about.html">About</a><a href="/sources.html">Data sources</a><a href="/api.html">API</a><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a><a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>
+ <p style="margin:12px 0 0">Supplier Watch CZ · Nicholas Kossow Jennings, sole trader, IČO 28948491 · Data from public registers: ARES, VAT register, ISIR and ČOI (Zdroj: Česká obchodní inspekce).</p>
+</div></footer>
+<script src="/csvimport.js"></script>
+<script src="/suppliers.js"></script>
+</body>
+</html>

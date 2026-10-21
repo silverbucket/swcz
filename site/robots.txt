@@ -1,0 +1,8 @@
+User-agent: *
+Disallow: /manage
+Disallow: /confirm
+Disallow: /unsubscribe
+Disallow: /api/
+Allow: /
+
+Sitemap: https://supplierwatch.cz/sitemap.xml

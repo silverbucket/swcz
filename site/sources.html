@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Data sources | Supplier Watch CZ</title>
+<meta name="description" content="The official sources Supplier Watch uses: the VAT register, ARES, the insolvency register ISIR and the ČOI risky e-shop list, with licences and current status.">
+<link rel="canonical" href="https://supplierwatch.cz/sources.html">
+<style>:root{--ink:#14202b;--muted:#5b6875;--line:#e3e8ee;--bg:#f6f8fa;--brand:#0a7c5a}
+*{box-sizing:border-box}body{margin:0;font:17px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink)}
+a{color:var(--brand)}.wrap{max-width:760px;margin:0 auto;padding:0 20px}
+header.top{border-bottom:1px solid var(--line)}header.top .wrap{display:flex;justify-content:space-between;align-items:center;height:60px;max-width:1040px}
+.logo{font-weight:700;color:var(--ink);text-decoration:none}.logo span{color:var(--brand)}.top nav a{color:var(--muted);text-decoration:none;margin-left:18px;font-size:15px}
+h1{font-size:clamp(28px,4vw,40px);line-height:1.15;margin:40px 0 12px}h2{margin:36px 0 10px;font-size:24px}h3{margin:24px 0 6px}
+.meta,.muted{color:var(--muted);font-size:15px}.box{background:var(--bg);border-radius:12px;padding:18px 22px;margin:24px 0}
+.cta{display:inline-block;background:var(--brand);color:#fff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:16px}td,th{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;vertical-align:top}
+footer{border-top:1px solid var(--line);margin-top:56px;padding:28px 0;color:var(--muted);font-size:15px}footer a{color:var(--muted);margin-right:16px}
+pre{background:#f1f3f5;border-radius:8px;padding:12px 14px;overflow:auto;font-size:14px;line-height:1.45}code{background:#f1f3f5;padding:1px 4px;border-radius:3px;font-size:.92em}pre code{padding:0;background:none}
+.ok{color:#0a7c5a;font-weight:600}.bad{color:#b4441f;font-weight:600}
+@media (max-width:760px){.top nav{display:none}}</style>
+</head>
+<body>
+<header class="top"><div class="wrap"><a class="logo" href="/">Supplier Watch <span>CZ</span></a><nav><a href="/#checks">What we check</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><a href="/#pricing">Pricing</a></nav></div></header>
+<main class="wrap">
+<h1>Data sources</h1>
+<p>Supplier Watch uses only official public sources. For each one: who publishes it, what we use it for, and the terms we use it under. We check every source each morning before the customer checks (see <a href="#status">current status</a>).</p>
+<h2>1. VAT register (Registr plátců DPH)</h2>
+<p><strong>Published by:</strong> the Financial Administration of the Czech Republic (Finanční správa). <strong>We use:</strong> the public web service for third-party software (rozhraní CRPDPH): whether a supplier is published as an unreliable VAT payer (§106a VAT Act) and which bank accounts it has published (§98). <strong>Terms:</strong> public data published by law for exactly this purpose; free to use. <a href="https://adisspr.mfcr.cz/dpr/DphReg" rel="noopener">Look up a supplier yourself</a>.</p>
+<h2>2. ARES (business register data)</h2>
+<p><strong>Published by:</strong> the Ministry of Finance. <strong>We use:</strong> the ARES REST API for the company name, registered address, legal form, dissolution and liquidation, and the public-register (veřejný rejstřík) record for the statutory body and owners. For directors and owners we store only a short fingerprint to detect changes, not the names. <strong>Terms:</strong> ARES data are public and published as open data; free to use. <a href="https://ares.gov.cz/" rel="noopener">ares.gov.cz</a>, details of companies at <a href="https://or.justice.cz/" rel="noopener">or.justice.cz</a>.</p>
+<h2>3. Insolvency register (ISIR)</h2>
+<p><strong>Published by:</strong> the Ministry of Justice. <strong>We use:</strong> the public ISIR web service to find insolvency proceedings by IČO, with the case number, state and a link to the case. We never store birth dates, personal ID numbers or home addresses. <strong>Terms:</strong> the register is public by law (§419 Insolvency Act); free to use within the service's limits (50 requests a minute). <a href="https://isir.justice.cz/" rel="noopener">isir.justice.cz</a>.</p>
+<h2>4. ČOI list of risky e-shops</h2>
+<p><strong>Published by:</strong> the Czech Trade Inspection Authority (Česká obchodní inspekce, ČOI) as open data. <strong>We use:</strong> the daily CSV of risky websites, matched against the supplier websites you enter. <strong>Terms:</strong> ČOI open-data licence, which allows commercial use with attribution and without implying endorsement: <a href="https://coi.gov.cz/pro-spotrebitele/otevrena-data/licence-otevrenych-dat/" rel="noopener">licence</a>. Zdroj: Česká obchodní inspekce. Supplier Watch is not affiliated with or endorsed by ČOI. <a href="https://www.coi.gov.cz/pro-spotrebitele/rizikove-e-shopy/" rel="noopener">The list on coi.gov.cz</a>.</p>
+<h2 id="status">Current status</h2>
+<p>Result of the latest daily self-check of each source:</p>
+<div id="sw-status" class="box"><p class="muted">Loading…</p></div>
+<p class="muted">Machine-readable: <a href="/healthz?detail=1">/healthz?detail=1</a>.</p>
+
+</main>
+<footer><div class="wrap">
+<a href="/">Home</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><a href="/about.html">About</a><a href="/sources.html">Data sources</a><a href="/api.html">API</a><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a><a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>
+<p style="margin:12px 0 0">Supplier Watch CZ is an independent service. It is not affiliated with the Czech Financial Administration, the Ministry of Justice or ČOI.</p>
+</div></footer>
+<script>
+(function(){var el=document.getElementById('sw-status');var N={ares:'ARES',vat:'VAT register',isir:'ISIR',coi:'ČOI risky e-shops'};
+fetch('/healthz?detail=1').then(function(r){return r.json()}).then(function(j){var s=j.sources;if(!s){el.innerHTML='<p class="muted">No self-check has run yet.</p>';return;}
+var t=new Date(s.checkedAt).toLocaleString('en-GB',{timeZone:'Europe/Prague'});var h='<p>Checked '+t+' (Prague time)</p><ul>';
+Object.keys(N).forEach(function(k){var d=s.detail&&s.detail[k];if(!d)return;h+='<li>'+N[k]+': '+(d.disabled?'<span class="muted">not used</span>':d.ok?'<span class="ok">OK</span>':'<span class="bad">FAILED</span> (affected checks are marked "not checked" today)')+'</li>';});
+el.innerHTML=h+'</ul>';}).catch(function(){el.innerHTML='<p class="muted">Status unavailable.</p>';});})();
+</script></body>
+</html>
