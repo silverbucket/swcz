@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { createServer } from '../src/server.js';
 import { monitoringEnabled, sitePage, writeSite } from '../src/site.js';
@@ -72,7 +73,9 @@ test('paused: sign-up, confirm, manage, billing and the API answer "paused"; fre
         assert.equal(api.status, 503); assert.equal((await api.json()).error.code, 'paused');
         assert.match(await (await post(`${url}/manage-link?freecheck=1`, { ico: '27082440' })).text(), /IČO 27082440/);
         const h = await (await fetch(`${url}/healthz?detail=1`)).json(); assert.equal(h.monitoring, false);
+        updates(dataDir).addConfirmed('old@firma.cz');
         assert.equal((await post(`${url}/unsubscribe?t=${a.unsubToken}`, '')).status, 200); assert.ok(accounts(dataDir).get(a.id).unsubscribed);
+        assert.equal(updates(dataDir).get('old@firma.cz'), null, '"stop all emails" includes updates');
         assert.equal(sent.length, 0);
     } finally { srv.close(); }
 });
@@ -174,6 +177,10 @@ test('runHealth: emails a new failure once, a changed failure set, and the recov
         await runF(); assert.equal(sent.length, 4);
         mailer.verify = async () => ({ ok: true }); await run(); assert.match(sent[4].subject, /OK again/);
         assert.equal((await (await fetch(`${url}/healthz?detail=1`)).json()).health.ok, true);
+        // written to the outbox only (no SMTP): not delivered, so not marked as notified
+        const outbox = { verify: async () => ({ dry: true }), send: async () => ({ dry: true }) };
+        await runHealth({ env: PAUSED, dataDir, baseUrl: url, token: srv.healthToken, mailer: outbox, log: () => {} });
+        assert.deepEqual(readHealth(dataDir).notified.failed, []);
         const dry = await runHealth({ env: PAUSED, dataDir, baseUrl: url, token: srv.healthToken, mailer: { send: async () => {}, verify: async () => ({ dry: true }) }, log: () => {} });
         assert.deepEqual(dry.failed, ['smtp']); assert.match(dry.probes.smtp.error, /not configured/);
         const unreachable = await runHealth({ env: PAUSED, dataDir: tmp(), baseUrl: 'http://127.0.0.1:9', token: 'x', mailer, log: () => {} });
@@ -211,4 +218,23 @@ test('daily run while paused: self-check and housekeeping only, no customer chec
     db.prepare('INSERT INTO lookups VALUES (?, ?, ?, ?)').run('ares', 'new', '{}', Date.now());
     await runAll({ env: PAUSED, dataDir, check: async () => assert.fail('check'), canary: async () => ({ failed: [] }), log: () => {} });
     assert.deepEqual(db.prepare('SELECT key FROM lookups').all().map((x) => x.key), ['new']);
+});
+
+const node = (args, env) => spawnSync(process.execPath, args, { cwd: new URL('..', import.meta.url).pathname, env: { ...process.env, ...env }, encoding: 'utf8', timeout: 10000 });
+
+test('admin delete also erases the address from the updates list, and works for an updates-only address', () => {
+    const dataDir = tmp('swadm-'); makeAccount(dataDir, 'both@firma.cz'); updates(dataDir).addConfirmed('both@firma.cz'); updates(dataDir).addConfirmed('list@firma.cz');
+    let r = node(['src/admin.js', 'delete', 'both@firma.cz'], { DATA_DIR: dataDir });
+    assert.equal(r.status, 0, r.stderr); assert.equal(accounts(dataDir).byEmail('both@firma.cz'), null); assert.equal(updates(dataDir).get('both@firma.cz'), null);
+    r = node(['src/admin.js', 'delete', 'LIST@firma.cz'], { DATA_DIR: dataDir });
+    assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /removed list@firma.cz from the updates list/); assert.equal(updates(dataDir).get('list@firma.cz'), null);
+    assert.equal(node(['src/admin.js', 'delete', 'nobody@firma.cz'], { DATA_DIR: dataDir }).status, 1);
+});
+
+test('the app refuses to start paused while a paid subscription still renews', () => {
+    const dataDir = tmp('swpaid-'); const a = makeAccount(dataDir, 'pays@firma.cz', { plan: 'starter' });
+    const acc = accounts(dataDir); acc.get(a.id).subscription = 'sub_1'; acc.save();
+    const r = node(['src/server.js'], { DATA_DIR: dataDir, SITE_DIR: path.join(dataDir, 'site'), SIGNUPS_ENABLED: 'false', PORT: '0', HEALTH_DISABLED: '1' });
+    assert.equal(r.status, 1); assert.match(r.stderr, /1 paid subscription\(s\) still renew: acc_/);
+    assert.equal(fs.existsSync(path.join(dataDir, 'site')), false, 'nothing written');
 });

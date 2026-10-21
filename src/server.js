@@ -307,6 +307,7 @@ ${reportsHtml(a, t, c.id)}
             const t = url.searchParams.get('t') || form().t;
             if (req.method !== 'POST') return send(200, page('Unsubscribe', `<form method="post" action="/unsubscribe?t=${esc(t)}"><p>Stop all Supplier Watch emails? / Zastavit všechny e-maily?</p><button>Unsubscribe / Odhlásit</button></form>`));
             const acc = new Accounts(accFile, { now }); const a = acc.unsubscribe(t); if (a) acc.save();
+            if (a && a.unsubToken === t) new Updates(accFile, { now }).remove(a.email); // the owner asked to stop all emails, updates included
             if (!a) return send(400, page('Unsubscribe', '<p>Unknown link.</p>'));
             if (a.unsubToken !== t) return send(200, page('Unsubscribe', '<p>You\'re unsubscribed and won\'t get any more emails from this list. / Odhlášení proběhlo, další e-maily už nedostanete.</p>')); // a client's extra recipient
             const paid = acc.liveSubscription(a) ? '<p>You have a paid plan: unsubscribing does not cancel it. Cancel it with the Manage billing button on your manage page; your account is deleted after the plan ends. / Placený tarif tím zrušen není, zrušte ho tlačítkem Správa plateb.</p>' : '';
@@ -345,6 +346,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (!process.env.STRIPE_WEBHOOK_SECRET) console.error('warning: STRIPE_WEBHOOK_SECRET not set; all webhooks will be rejected');
     if (!process.env.SMTP_HOST || !process.env.SMTP_PASS) console.error('warning: SMTP_HOST/SMTP_PASS not set; emails are written to DATA_DIR/outbox instead of sent');
     const env = process.env; const dataDir = env.DATA_DIR || 'data'; const on = monitoringEnabled(env);
+    if (!on) { // paused, nobody can reach the billing portal: refuse while someone is still paying
+        const acc = new Accounts(path.join(dataDir, 'accounts.json')); const paying = acc.all().filter((a) => acc.liveSubscription(a) && !a.cancelAt);
+        if (paying.length) { console.error(`SIGNUPS_ENABLED=false but ${paying.length} paid subscription(s) still renew: ${paying.map((a) => a.id).join(', ')}. Cancel them in the Stripe dashboard first (or turn sign-ups back on).`); process.exit(1); }
+    }
     const siteDir = env.SITE_DIR || path.join(dataDir, 'site'); // nginx root
     console.log(`monitoring ${on ? 'enabled' : 'PAUSED'}; wrote ${writeSite(path.join(ROOT, 'site'), siteDir, on)} site files to ${siteDir}`);
     if (!env.HEALTH_EMAIL) console.error('warning: HEALTH_EMAIL not set; health check alerts go to OPS_EMAIL');

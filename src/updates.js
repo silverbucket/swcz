@@ -35,6 +35,8 @@ export class Updates {
             ON CONFLICT(email) DO UPDATE SET confirmed_at = coalesce(updates.confirmed_at, excluded.confirmed_at), confirm_hash = NULL, confirm_exp = NULL`)
             .run(normEmail(email), at, at, consent, source, token());
     }
+    /** Remove an address outright (erasure, or an account owner's "stop all emails"). Returns whether it was there. */
+    remove(email) { return this.sql.prepare('DELETE FROM updates WHERE email = ?').run(normEmail(email)).changes > 0; }
     /** Remove the address with this unsubscribe token. Returns the email, or null. */
     unsubscribe(u) { return (u && this.sql.prepare('DELETE FROM updates WHERE unsub = ? RETURNING email').get(String(u))?.email) ?? null; }
     confirmed() { return this.sql.prepare('SELECT email, confirmed_at, source, unsub FROM updates WHERE confirmed_at IS NOT NULL ORDER BY confirmed_at').all(); }

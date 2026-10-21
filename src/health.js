@@ -28,7 +28,9 @@ export const PROBES = {
         must(r.status === 200, `sign-up HTTP ${r.status}`); must(/Check your email/.test(await r.text()), 'sign-up did not confirm');
     },
     async freecheck({ post }) {
-        const r = await post('/manage-link?freecheck=1', { ico: CANARY_ICO });
+        // On a cache miss the registers' own timeouts and retries can exceed a minute; wait longer than nginx does
+        // (proxy_read_timeout, 60 s by default), so the probe fails only when a visitor would.
+        const r = await post('/manage-link?freecheck=1', { ico: CANARY_ICO }, 120e3);
         must(r.status === 200, `free check HTTP ${r.status}`);
         const res = (await r.text()).match(/data-result="(\w+)"[^>]*>[^<]*IČO (\d{8})/);
         must(res && res[2] === CANARY_ICO, 'free check returned no result');
@@ -45,7 +47,7 @@ export const PROBE_NAMES = { home: 'Home page', signup: 'Sign-up form', freechec
 export async function runHealth({ env = process.env, dataDir = env.DATA_DIR || 'data', baseUrl, token, mailer, probes = PROBES, fetchFn = globalThis.fetch, log = console.error, now = () => Date.now(), timeoutMs = 30000 } = {}) {
     const base = (baseUrl || env.BASE_URL || 'https://supplierwatch.cz').replace(/\/$/, '');
     const on = monitoringEnabled(env);
-    const req = (p, body) => fetchFn(`${base}${p}`, { method: body ? 'POST' : 'GET', body: body ? new URLSearchParams(body) : undefined, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs), headers: { [PROBE_HEADER]: token, 'user-agent': 'SupplierWatch-health' } });
+    const req = (p, body, ms = timeoutMs) => fetchFn(`${base}${p}`, { method: body ? 'POST' : 'GET', body: body ? new URLSearchParams(body) : undefined, redirect: 'manual', signal: AbortSignal.timeout(ms), headers: { [PROBE_HEADER]: token, 'user-agent': 'SupplierWatch-health' } });
     const ctx = { get: (p) => req(p), post: req, on, mailer };
     const results = {};
     for (const [name, probe] of Object.entries(probes)) {
@@ -65,7 +67,12 @@ export async function runHealth({ env = process.env, dataDir = env.DATA_DIR || '
             ? [`Supplier Watch ops: health check FAILED (${failed.map((f) => PROBE_NAMES[f] ?? f).join(', ')})`,
                 `The hourly health check of ${base} failed at ${at}:\n\n${failed.map((f) => `${PROBE_NAMES[f] ?? f}: ${results[f].error}`).join('\n')}\n\nYou get another email when this changes or recovers.\nStatus: ${base}/healthz?detail=1`]
             : ['Supplier Watch ops: health check OK again', `All health checks of ${base} passed at ${at}.`];
-        try { if (!mailer) throw new Error('no mailer'); await mailer.send({ to, unsubscribeUrl: `${base}/`, subject, text }); notified = { failed, at }; } catch (e) { log(`health mail failed, retried next run: ${e.message}`); }
+        try {
+            if (!mailer) throw new Error('no mailer');
+            const r = await mailer.send({ to, unsubscribeUrl: `${base}/`, subject, text });
+            if (r?.dry) throw new Error('SMTP not configured, written to the outbox only'); // not delivered: try again next run
+            notified = { failed, at };
+        } catch (e) { log(`health mail failed, retried next run: ${e.message}`); }
     }
     const st = { checkedAt: new Date(now()).toISOString(), ok: !failed.length, monitoring: on, probes: results, failed, notified };
     fs.mkdirSync(dataDir, { recursive: true });
