@@ -14,6 +14,9 @@ export const sitePage = (html, on) => String(html).replace(BLOCK, (_, k, body) =
 
 /** Copy the site directory to `dest`, rendering every .html page for the setting. Files are replaced one by one (no gap). */
 export function writeSite(src, dest, on) {
+    const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+    const s = real(src); const d = real(dest);
+    if (d === s || d.startsWith(s + path.sep) || s.startsWith(d + path.sep)) throw new Error(`SITE_DIR ${dest} overlaps the page sources ${src}; it must be a separate directory`);
     let n = 0;
     for (const e of fs.readdirSync(src, { withFileTypes: true })) {
         const from = path.join(src, e.name); const to = path.join(dest, e.name);

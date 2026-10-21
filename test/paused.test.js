@@ -51,6 +51,9 @@ test('writeSite renders every page for the setting into the served directory', (
     assert.equal(fs.readFileSync(path.join(dest, 'g', 'a.html'), 'utf8'), 'xP'); assert.equal(fs.readFileSync(path.join(dest, 'b.png'), 'utf8'), 'bin');
     writeSite(src, dest, true); assert.equal(fs.readFileSync(path.join(dest, 'g', 'a.html'), 'utf8'), 'xM');
     assert.deepEqual(fs.readdirSync(dest).sort(), ['b.png', 'g']); // no .tmp left behind
+    const link = path.join(tmp('swlink-'), 'public'); fs.symlinkSync(src, link);
+    for (const d of [src, link, path.join(src, 'g'), path.dirname(src)]) assert.throws(() => writeSite(src, d, false), /overlaps/, d);
+    assert.match(fs.readFileSync(path.join(src, 'g', 'a.html'), 'utf8'), /<!--if paused-->/, 'sources untouched');
 });
 
 test('paused: sign-up, confirm, manage, billing and the API answer "paused"; free check, account unsubscribe and healthz stay', async () => {
