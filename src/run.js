@@ -6,18 +6,17 @@ import { Accounts } from './accounts.js';
 import { createMailer } from './mailer.js';
 import { runWatchlist } from './runner.js';
 import { checkWatchlist } from './check.js';
-import { getSubject, getVr } from './sources/ares.js';
-import { getStatuses } from './sources/dph.js';
-import { getByIco } from './sources/isir.js';
+import { REGISTER_SOURCES, cachedSources, markRunStart } from './lookups.js';
 import { loadCoiList } from './sources/coi.js';
 import { runCanary, skipFrom } from './canary.js';
 import { pruneHistory, DEFAULT_HISTORY_MONTHS } from './history.js';
 import { sendMonthlyReports } from './monthly.js';
 
-export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'data', mailer = createMailer(env), check, log = console.error, isirEnabled = env.ISIR_DISABLED !== '1', coiEnabled = env.COI_DISABLED !== '1', loadCoi = loadCoiList, canary = check ? null : runCanary, now = () => Date.now(), sources = { ares: getSubject, vr: getVr, dph: getStatuses, isir: getByIco } } = {}) {
-    // One lookup per IČO per run, shared by every list that watches it (ISIR allows 3,000 calls a day). DPH is batched already.
-    const once = (fn) => { const m = new Map(); return (k) => { if (!m.has(k)) m.set(k, fn(k)); return m.get(k); }; };
-    const shared = { ares: once(sources.ares), vr: once(sources.vr), dph: sources.dph, isir: once(sources.isir) };
+export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'data', mailer = createMailer(env), check, log = console.error, isirEnabled = env.ISIR_DISABLED !== '1', coiEnabled = env.COI_DISABLED !== '1', loadCoi = loadCoiList, canary = check ? null : runCanary, now = () => Date.now(), sources = REGISTER_SOURCES } = {}) {
+    // Every cached register answer is stale from now on: this run fetches each watched IČO once (shared by all
+    // lists that watch it, and with free checks) and leaves fresh answers for the free check until the next run.
+    markRunStart(dataDir, now());
+    const shared = cachedSources(dataDir, { sources, now });
     const doCheck = check ?? ((items, o) => checkWatchlist(items, { ...o, sources: shared }));
     const baseUrl = (env.BASE_URL || 'https://supplierwatch.cz').replace(/\/$/, '');
     const acc = new Accounts(path.join(dataDir, 'accounts.json'));

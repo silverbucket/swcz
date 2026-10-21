@@ -1,9 +1,11 @@
 // Free one-off "check one IČO" page: runs the same checks as the daily monitor, once, without an account.
 // Abuse limits: per-IP (default 5 per hour) and a global cap (default 60 per hour, so with the daily run we stay
-// under ISIR's 3,000 calls a day), both in memory. Each IČO is looked up at most once per Prague day.
+// under ISIR's 3,000 calls a day), both in memory. Register answers come from the shared cache (lookups.js), so an
+// IČO the daily run already checked costs the registers nothing and does not count against the limits.
 import { checkWatchlist, currentAlerts } from './check.js';
 import { normaliseIco, isValidIco } from './ico.js';
-import { loadCoiList, normalizeDomain, matchDomain, COI_LICENCE_URL, COI_CREDIT } from './sources/coi.js';
+import { loadCoiList, normalizeDomain, COI_LICENCE_URL, COI_CREDIT } from './sources/coi.js';
+import { REGISTER_SOURCES, cachedSources } from './lookups.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -65,14 +67,14 @@ export function renderResult(r, { coiUsed }) {
     return `<h1>${esc(a.name ?? r.ico)} · IČO ${esc(r.ico)}</h1>
 ${alerts.length ? `<p class="sw-err"><strong>Warnings:</strong><br>${alerts.map((x) => esc(ALERT_TEXT[x] ?? x)).join('<br>')}</p>` : '<p><strong>No warnings found in the checked registers today.</strong></p>'}
 <table>${rows.map(([k, val]) => `<tr><th style="text-align:left;vertical-align:top;padding:.2rem 1rem .2rem 0">${k}</th><td>${val}</td></tr>`).join('')}</table>${errs}
-<p class="muted">Checked ${esc(new Date(r.checkedAt).toISOString().slice(0, 16).replace('T', ' '))} UTC. Sources: ARES, Financial Administration VAT register, ISIR${coiUsed ? `, <a href="${COI_LICENCE_URL}">${COI_CREDIT}</a> (Supplier Watch is not affiliated with or endorsed by ČOI)` : ''}. Information only, not legal or tax advice.</p>
+<p class="muted">Register data from ${esc(new Date(r.checkedAt).toISOString().slice(0, 16).replace('T', ' '))} UTC. Sources: ARES, Financial Administration VAT register, ISIR${coiUsed ? `, <a href="${COI_LICENCE_URL}">${COI_CREDIT}</a> (Supplier Watch is not affiliated with or endorsed by ČOI)` : ''}. Information only, not legal or tax advice.</p>
 <h2>Get an email when this changes</h2>
 <p>A supplier can become an unreliable VAT payer, change its bank accounts or enter insolvency at any time. Supplier Watch checks your suppliers every morning and emails you only when something changes. Free for up to 5 suppliers.</p>
 <p><a class="cta" href="/#signup">Watch this supplier for free</a> <a href="/check.html">Check another IČO</a> · <a href="/guides/">Guides</a></p>`;
 }
 
-export function createFreeCheck({ env = process.env, dataDir, check = checkWatchlist, loadCoi = loadCoiList, limiter = new RateLimiter({ perIp: Number(env.FREECHECK_PER_IP || 5), global: Number(env.FREECHECK_GLOBAL || 60) }), now = () => Date.now() } = {}) {
-    let coiCache = null; let coiAt = 0; const cache = new Map(); let cacheDay = ''; // IČO -> check row, for today only
+export function createFreeCheck({ env = process.env, dataDir, check = checkWatchlist, sources = REGISTER_SOURCES, loadCoi = loadCoiList, limiter = new RateLimiter({ perIp: Number(env.FREECHECK_PER_IP || 5), global: Number(env.FREECHECK_GLOBAL || 60) }), now = () => Date.now() } = {}) {
+    let coiCache = null; let coiAt = 0; let lookups;
     const getCoi = async () => { if (!coiCache || now() - coiAt > 6 * 3600e3) { coiCache = await loadCoi({ dataDir }).catch(() => null); coiAt = now(); } return coiCache; };
     return async function handleCheck(req, form, page) {
         if (req.method !== 'POST') return [200, page('Check a Czech supplier by IČO', checkForm())];
@@ -81,19 +83,13 @@ export function createFreeCheck({ env = process.env, dataDir, check = checkWatch
         if (!ico || !isValidIco(ico)) return [400, page('Check a Czech supplier by IČO', checkForm({ ico: form.ico, web, error: 'That is not a valid IČO (8 digits with a checksum). / Neplatné IČO.' }))];
         const website = web ? normalizeDomain(web) : null;
         if (web && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(website)) return [400, page('Check a Czech supplier by IČO', checkForm({ ico, web, error: 'That website does not look like a domain, e.g. firma.cz.' }))];
-        const day = new Date(now()).toLocaleDateString('en-CA', { timeZone: 'Europe/Prague' });
-        if (day !== cacheDay) { cache.clear(); cacheDay = day; }
-        let row = cache.get(ico);
-        if (!row) { // cached answers skip the limits: they cost the registers nothing
-            if (!limiter.allow(clientIp(req))) return [429, page('Too many checks', `<p>Too many checks for now. Please try again in an hour, or <a href="/#signup">sign up free</a> to have up to 5 suppliers checked every day.</p>`)];
-            row = (await check([{ ico }], { isirEnabled: env.ISIR_DISABLED !== '1' })).rows[0];
-            if (!row.sourceErrors.length) cache.set(ico, row); // a failed source is retried by the next check
-        }
-        // ČOI depends on the website entered, so it is matched per request against the (cached) list.
+        lookups ??= cachedSources(dataDir, { sources, now });
+        const isirEnabled = env.ISIR_DISABLED !== '1';
+        // Answers already in the cache cost the registers nothing, so they skip the limits.
+        if (!lookups.cached(ico, { isir: isirEnabled }) && !limiter.allow(clientIp(req))) return [429, page('Too many checks', `<p>Too many checks for now. Please try again in an hour, or <a href="/#signup">sign up free</a> to have up to 5 suppliers checked every day.</p>`)];
         const coi = website && env.COI_DISABLED !== '1' ? await getCoi() : undefined;
-        const r = { ...row, website: website || null, sourceErrors: [...row.sourceErrors] };
-        if (coi) r.coi = { matches: matchDomain(coi.entries, website).map((e) => ({ domain: e.domain, reason: e.reason, listedOn: e.listedOn })) };
-        else if (coi === null) r.sourceErrors.push('coi: list unavailable');
-        return [200, page(`Check result ${ico}`, renderResult(r, { coiUsed: !!website && coi !== undefined }))];
+        const { rows } = await check([{ ico, website }], { isirEnabled, coi, sources: lookups });
+        const asOf = lookups.fetchedAt(ico); if (asOf) rows[0].checkedAt = new Date(asOf).toISOString(); // may be the morning's daily run
+        return [200, page(`Check result ${ico}`, renderResult(rows[0], { coiUsed: !!website && coi !== undefined }))];
     };
 }
