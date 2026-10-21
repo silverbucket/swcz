@@ -21,10 +21,10 @@ pre{background:#f1f3f5;border-radius:8px;padding:12px 14px;overflow:auto;font-si
 @media (max-width:760px){.top nav{display:none}}</style>
 </head>
 <body>
-<header class="top"><div class="wrap"><a class="logo" href="/">Supplier Watch <span>CZ</span></a><nav><a href="/#checks">What we check</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><a href="/#pricing">Pricing</a></nav></div></header>
+<header class="top"><div class="wrap"><a class="logo" href="/">Supplier Watch <span>CZ</span></a><nav><a href="/#checks">What we check</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><!--if monitoring--><a href="/#pricing">Pricing</a><!--end--></nav></div></header>
 <main class="wrap">
 <h1>About Supplier Watch</h1>
-<p>Supplier Watch CZ checks Czech suppliers every morning in the official public registers and emails you, in English with the Czech wording alongside, only when something changes. Each month you also get a PDF report of every check, which you can keep as evidence that you checked your suppliers.</p>
+<!--if monitoring--><p>Supplier Watch CZ checks Czech suppliers every morning in the official public registers and emails you, in English with the Czech wording alongside, only when something changes. Each month you also get a PDF report of every check, which you can keep as evidence that you checked your suppliers.</p><!--end--><!--if paused--><p>Supplier Watch CZ checks Czech suppliers in the official public registers, in English with the Czech wording alongside. The <a href="/check.html">free one-off check</a> is available; ongoing daily monitoring is currently paused.</p><!--end-->
 <h2>Who runs it</h2>
 <table>
 <tr><th>Operator</th><td>Nicholas Kossow Jennings, sole trader (fyzická osoba podnikající)</td></tr>
@@ -43,11 +43,11 @@ pre{background:#f1f3f5;border-radius:8px;padding:12px 14px;overflow:auto;font-si
 <li><strong>Minimal data.</strong> We store your email, your supplier list and the check results. No tracking cookies, no ads. See the <a href="/privacy.html">privacy policy</a>.</li>
 <li><strong>Information, not advice.</strong> Results show what the registers said when we checked; they are not legal or tax advice.</li>
 </ul>
-<p><a class="cta" href="/#signup">Start free with 5 suppliers</a></p>
+<p><!--if monitoring--><a class="cta" href="/#signup">Start free with 5 suppliers</a><!--end--><!--if paused--><a class="cta" href="/check.html">Check a supplier free</a><!--end--></p>
 
 </main>
 <footer><div class="wrap">
-<a href="/">Home</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><a href="/about.html">About</a><a href="/sources.html">Data sources</a><a href="/api.html">API</a><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a><a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>
+<a href="/">Home</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><a href="/about.html">About</a><a href="/sources.html">Data sources</a><!--if monitoring--><a href="/api.html">API</a><!--end--><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a><a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>
 <p style="margin:12px 0 0">Supplier Watch CZ is an independent service. It is not affiliated with the Czech Financial Administration, the Ministry of Justice or ČOI.</p>
 </div></footer>
 </body>

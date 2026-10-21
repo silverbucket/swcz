@@ -11,6 +11,8 @@ export function createMailer(env = process.env) {
     const transport = dry ? null : nodemailer.createTransport({ host: env.SMTP_HOST, port: Number(env.SMTP_PORT || 587), secure: Number(env.SMTP_PORT) === 465, auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined });
     return {
         dry, outbox,
+        /** Log in to the SMTP server without sending (health check). */
+        async verify() { if (dry) return { dry: true }; await transport.verify(); return { ok: true }; },
         async send({ to, subject, text, unsubscribeUrl, attachments }) {
             const body = `${text}\n\n--\nUnsubscribe / Odhlásit: ${unsubscribeUrl}\n`;
             const msg = { from, replyTo, to, subject, text: body, html: renderHtml({ subject, text, unsubscribeUrl }), headers: { 'List-Unsubscribe': `<${unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } };

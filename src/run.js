@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Daily job: data-source self-check, then check every confirmed, subscribed account (plan limit applied across
 // all its lists), email only when something changed, record history, send last month's PDF report on the 1st.
+// With MONITORING_ENABLED=false only the self-check (its alert still reaches OPS_EMAIL) and the housekeeping run.
 import fs from 'node:fs';
 import path from 'node:path';
 import { Accounts } from './accounts.js';
@@ -12,6 +13,8 @@ import { loadCoiList } from './sources/coi.js';
 import { runCanary, skipFrom } from './canary.js';
 import { pruneHistory, deleteAccountFiles, DEFAULT_HISTORY_MONTHS } from './history.js';
 import { sendMonthlyReports } from './monthly.js';
+import { Updates } from './updates.js';
+import { monitoringEnabled } from './site.js';
 
 /** Keep only the given suppliers in a list snapshot (facts and latest); rewrites the file only if something goes. */
 function trimSnapshot(file, icos) {
@@ -23,18 +26,21 @@ function trimSnapshot(file, icos) {
 }
 
 export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'data', mailer = createMailer(env), check, log = console.error, isirEnabled = env.ISIR_DISABLED !== '1', coiEnabled = env.COI_DISABLED !== '1', loadCoi = loadCoiList, canary = check ? null : runCanary, now = () => Date.now(), sources = REGISTER_SOURCES } = {}) {
+    const acc = new Accounts(path.join(dataDir, 'accounts.json'), { now });
+    const summary = { checked: 0, emailed: 0, failed: 0, sourcesFailed: [], reports: 0 };
+    let skip = {};
+    const selfCheck = async () => {
+        if (!canary || env.CANARY_DISABLED === '1') return; // tests that inject `check` run without the network canary unless they pass one
+        try { const st = await canary({ env, dataDir, mailer, log }); skip = skipFrom(st); summary.sourcesFailed = st.failed; } catch (e) { log(`canary error: ${e.message}`); }
+    };
+    if (!monitoringEnabled(env)) { await selfCheck(); housekeeping(acc, { env, dataDir, now, log, summary }); return { ...summary, paused: true }; }
     // Every cached register answer is stale from now on: this run fetches each watched IČO once (shared by all
     // lists that watch it, and with free checks) and leaves fresh answers for the free check until the next run.
     markRunStart(dataDir, now());
     const shared = cachedSources(dataDir, { sources, now });
     const doCheck = check ?? ((items, o) => checkWatchlist(items, { ...o, sources: shared }));
     const baseUrl = (env.BASE_URL || 'https://supplierwatch.cz').replace(/\/$/, '');
-    const acc = new Accounts(path.join(dataDir, 'accounts.json'), { now });
-    const summary = { checked: 0, emailed: 0, failed: 0, sourcesFailed: [], reports: 0 };
-    let skip = {};
-    if (canary && env.CANARY_DISABLED !== '1') { // tests that inject `check` run without the network canary unless they pass one
-        try { const st = await canary({ env, dataDir, mailer, log }); skip = skipFrom(st); summary.sourcesFailed = st.failed; } catch (e) { log(`canary error: ${e.message}`); }
-    }
+    await selfCheck();
     // ČOI list: downloaded at most once per run, and only if some active account has a website.
     let coi; let coiLoaded = false;
     const getCoi = async () => { if (!coiLoaded) { coiLoaded = true; coi = skip.coi ? null : await loadCoi({ dataDir, log }).catch(() => null); } return coi; };
@@ -80,17 +86,23 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
     }
     try { summary.reports = await sendMonthlyReports({ dataDir, acc, mailer, baseUrl, now: new Date(now()), log }); } catch (e) { log(`monthly reports: ${e.message}`); }
     acc.save();
+    housekeeping(acc, { env, dataDir, now, log, summary });
+    // An account erased while its lists were being checked (node src/admin.js delete) got files written back: remove them.
+    for (const id of processed) if (!acc.fresh(id)) { try { deleteAccountFiles(dataDir, id); } catch (e) { log(`cleanup ${id}: ${e.message}`); } }
+    return summary;
+}
+
+/** Purge unconfirmed sign-ups (accounts and updates list), delete accounts whose grace period is over, prune old history. */
+function housekeeping(acc, { env, dataDir, now, log, summary }) {
     try { const n = acc.purgeUnconfirmed(); if (n) log(`purged ${n} unconfirmed sign-ups`); } catch (e) { log(`purge: ${e.message}`); }
+    try { const n = new Updates(acc.file, { now }).purgeUnconfirmed(); if (n) log(`purged ${n} unconfirmed updates sign-ups`); } catch (e) { log(`purge updates: ${e.message}`); }
     try {
         const d = acc.purgeDeleted(); summary.deleted = d.deleted.length;
         if (d.deleted.length) log(`deleted accounts: ${d.deleted.join(', ')}`);
         if (d.waiting.length) log(`deletion due but a paid subscription is still running: ${d.waiting.join(', ')}`);
         if (d.failed.length) log(`account deletion failed, retried tomorrow: ${d.failed.join('; ')}`);
     } catch (e) { log(`account deletion: ${e.message}`); }
-    // An account erased while its lists were being checked (node src/admin.js delete) got files written back: remove them.
-    for (const id of processed) if (!acc.fresh(id)) { try { deleteAccountFiles(dataDir, id); } catch (e) { log(`cleanup ${id}: ${e.message}`); } }
     try { const n = pruneHistory(dataDir, Number(env.HISTORY_MONTHS || DEFAULT_HISTORY_MONTHS), new Date(now())); if (n) log(`pruned ${n} old history/report files`); } catch (e) { log(`prune: ${e.message}`); }
-    return summary;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

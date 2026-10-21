@@ -80,7 +80,7 @@ export const suppliersText = (a) => a.icos.map((i) => (a.websites?.[i] ? `${i} $
 const conns = new Map();
 const tx = (db, fn) => { db.exec('BEGIN IMMEDIATE'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } };
 /** SQLite store next to the legacy JSON file (accounts.json -> accounts.db), shared by the web app and the daily run:
- * accounts, magic-link tokens, and the register lookup cache (see lookups.js). */
+ * accounts, magic-link tokens, the register lookup cache (see lookups.js) and the updates list (see updates.js). */
 export function openDb(file) {
     const dbFile = file.replace(/\.json$/, '') + '.db';
     if (conns.has(dbFile)) return conns.get(dbFile);
@@ -91,7 +91,8 @@ export function openDb(file) {
         CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, data TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tokens (hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, kind TEXT NOT NULL, exp INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS lookups (source TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, fetched_at INTEGER NOT NULL, PRIMARY KEY (source, key));
-        CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);`);
+        CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
+        CREATE TABLE IF NOT EXISTS updates (email TEXT PRIMARY KEY, created_at TEXT NOT NULL, confirmed_at TEXT, consent TEXT, source TEXT, confirm_hash TEXT UNIQUE, confirm_exp INTEGER, unsub TEXT NOT NULL UNIQUE);`);
     if (fs.existsSync(file)) { // one-time import of the old JSON store, then the JSON file is deleted (take a backup before deploying)
         tx(db, () => {
             if (db.prepare('SELECT 1 FROM accounts LIMIT 1').get()) return;
