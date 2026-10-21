@@ -31,17 +31,22 @@ export async function checkWatchlist(items, { sources = { ares: getSubject, vr: 
     }
 
     // VAT register: use the DIČ from ARES when present, else try the IČO (legal entities usually have DIČ = CZ + IČO).
+    // Without an ARES answer use the DIČ ARES gave last time (it.dic); a sole trader's DIČ is not CZ + IČO, so
+    // guessing would report them as "not in the VAT register". Unknown -> VAT not checked today.
     const valid = out.filter((r) => !r.invalid);
-    const dicFor = (r) => (r.ares?.dic ?? `CZ${r.ico}`).replace(/^CZ/, '');
-    if (skip.dph) { if (valid.length) errors.dph++; for (const r of valid) r.sourceErrors.push(`dph: ${SKIP}`); } else try {
-        const { generated, subjects } = await sources.dph(valid.map(dicFor));
-        for (const r of valid) {
+    const dicOf = new Map(items.map((it) => [normaliseIco(it.ico), it.dic]));
+    const dicFor = (r) => { const known = dicOf.get(r.ico); const d = r.ares ? r.ares.dic ?? `CZ${r.ico}` : known === undefined ? null : known ?? `CZ${r.ico}`; return d && d.replace(/^CZ/, ''); };
+    const vatRows = valid.filter((r) => dicFor(r) !== null);
+    if (vatRows.length < valid.length) { errors.dph++; for (const r of valid) if (dicFor(r) === null) r.sourceErrors.push('dph: DIČ unknown while ARES is unavailable'); }
+    if (skip.dph) { if (vatRows.length) errors.dph++; for (const r of vatRows) r.sourceErrors.push(`dph: ${SKIP}`); } else try {
+        const { generated, subjects } = await sources.dph(vatRows.map(dicFor));
+        for (const r of vatRows) {
             const s = subjects.get(dicFor(r));
             r.vat = s ? { ...s, registerDate: generated } : { subjectType: 'NENALEZEN', unreliable: 'NENALEZEN', accounts: [] };
         }
     } catch (e) {
         errors.dph++;
-        for (const r of valid) r.sourceErrors.push(`dph: ${e.message}`);
+        for (const r of vatRows) r.sourceErrors.push(`dph: ${e.message}`);
     }
 
     if (isirEnabled) {
@@ -79,6 +84,7 @@ export function facts(r) {
         f.dissolved = r.ares.dissolved ?? null;
         f.aresInsolvencyFlag = r.ares.aresInsolvencyFlag ?? null;
         f.aresVatFlag = r.ares.aresVatFlag ?? null;
+        f.dic = r.ares.dic ?? null; // not compared; reused for the VAT lookup on a day ARES does not answer
     }
     if (r.vr) { f.statutoryHash = r.vr.statutoryHash; f.ownersHash = r.vr.ownersHash; }
     if (r.vat) {
@@ -109,6 +115,13 @@ export function currentAlerts(r) {
     if (r.coi?.matches.length) a.push('COI_RISKY_WEBSITE');
     return a;
 }
+
+// The fact each alert rests on. An alert counts as new (emailed once) when the stored baseline lacks that fact: the
+// supplier is new to the list, or that register did not answer when the supplier was first checked.
+export const ALERT_FACT = {
+    NOT_IN_ARES: 'found', DISSOLVED: 'dissolved', UNRELIABLE_VAT_PAYER: 'unreliable', EXPECTED_ACCOUNT_NOT_PUBLISHED: 'expectedAccountPublished',
+    INSOLVENCY_PROCEEDING: 'isirCases', INSOLVENCY_FLAG_IN_ARES: 'aresInsolvencyFlag', IN_LIQUIDATION: 'name', COI_RISKY_WEBSITE: 'coiListed',
+};
 
 const LABELS = {
     name: 'NAME_CHANGED', address: 'ADDRESS_CHANGED', dissolved: 'DISSOLVED_CHANGED', aresInsolvencyFlag: 'ARES_INSOLVENCY_FLAG_CHANGED', aresVatFlag: 'ARES_VAT_FLAG_CHANGED',

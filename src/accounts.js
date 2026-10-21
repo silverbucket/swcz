@@ -1,14 +1,17 @@
-// Customer accounts: double opt-in, magic links, plan + supplier limit. Stored as one JSON file.
+// Customer accounts: double opt-in, magic links, plan + supplier limit. Stored in SQLite (one JSON row per account).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { isValidIco, normaliseIco } from './ico.js';
 import { normalizeDomain } from './sources/coi.js';
+import { deleteAccountFiles } from './history.js';
 import { parseText as parseCsvText, looksLikeCsv } from './csv.js';
 
 import { PLANS, PLAN_BY_AMOUNT, PLAN_INFO, MAX_CLIENTS } from './plans.js';
 export { PLANS };
 export const TOKEN_TTL_MS = { confirm: 48 * 3600e3, manage: 24 * 3600e3 };
+export const DELETE_GRACE_DAYS = 30;
 const token = () => crypto.randomBytes(24).toString('base64url');
 const hash = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 export const normEmail = (e) => String(e ?? '').trim().toLowerCase();
@@ -74,9 +77,75 @@ export const pickWebsites = (icos, websites = {}) => Object.fromEntries(icos.fil
 /** Supplier list as editable text: "IČO website" per line. */
 export const suppliersText = (a) => a.icos.map((i) => (a.websites?.[i] ? `${i} ${a.websites[i]}` : i)).join('\n');
 
+const conns = new Map();
+const tx = (db, fn) => { db.exec('BEGIN IMMEDIATE'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } };
+/** SQLite store next to the legacy JSON file (accounts.json -> accounts.db), shared by the web app and the daily run:
+ * accounts, magic-link tokens, and the register lookup cache (see lookups.js). */
+export function openDb(file) {
+    const dbFile = file.replace(/\.json$/, '') + '.db';
+    if (conns.has(dbFile)) return conns.get(dbFile);
+    fs.mkdirSync(path.dirname(dbFile), { recursive: true });
+    const db = new DatabaseSync(dbFile);
+    fs.chmodSync(dbFile, 0o600);
+    db.exec(`PRAGMA busy_timeout = 10000; PRAGMA journal_mode = WAL;
+        CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS tokens (hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, kind TEXT NOT NULL, exp INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS lookups (source TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, fetched_at INTEGER NOT NULL, PRIMARY KEY (source, key));
+        CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);`);
+    if (fs.existsSync(file)) { // one-time import of the old JSON store, then the JSON file is deleted (take a backup before deploying)
+        tx(db, () => {
+            if (db.prepare('SELECT 1 FROM accounts LIMIT 1').get()) return;
+            const old = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const put = db.prepare('INSERT INTO accounts (id, data) VALUES (?, ?)'); const tok = db.prepare('INSERT OR IGNORE INTO tokens VALUES (?, ?, ?, ?)');
+            for (const a of Object.values(old.accounts ?? {})) put.run(a.id, JSON.stringify(a));
+            for (const [h, v] of Object.entries(old.tokens ?? {})) tok.run(h, v.accountId, v.kind, v.exp);
+        });
+        fs.rmSync(file, { force: true }); // a leftover copy would keep deleted accounts' data forever
+    }
+    conns.set(dbFile, db);
+    return db;
+}
+
 export class Accounts {
-    constructor(file, { now = () => Date.now() } = {}) { this.file = file; this.now = now; this.db = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { accounts: {}, tokens: {} }; }
-    save() { fs.mkdirSync(path.dirname(this.file), { recursive: true }); const tmp = `${this.file}.tmp`; fs.writeFileSync(tmp, JSON.stringify(this.db, null, 1), { mode: 0o600 }); fs.renameSync(tmp, this.file); }
+    constructor(file, { now = () => Date.now() } = {}) {
+        this.file = file; this.now = now; this.sql = openDb(file);
+        const rows = this.sql.prepare('SELECT id, data FROM accounts').all();
+        this.db = { accounts: Object.fromEntries(rows.map((r) => [r.id, JSON.parse(r.data)])) };
+        this.snap = new Map(rows.map((r) => [r.id, r.data]));
+    }
+    /**
+     * Write accounts changed since load. Merge per top-level field against the current row, so a concurrent
+     * writer (web app vs. daily run) keeps the fields it changed, e.g. an unsubscribe during a long run.
+     */
+    save() {
+        const changed = this.all().filter((a) => JSON.stringify(a) !== this.snap.get(a.id));
+        if (!changed.length) return;
+        const get = this.sql.prepare('SELECT data FROM accounts WHERE id = ?');
+        const put = this.sql.prepare('INSERT INTO accounts (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data');
+        tx(this.sql, () => {
+            for (const a of changed) {
+                const before = JSON.parse(this.snap.get(a.id) ?? '{}'); const row = get.get(a.id); const cur = row ? JSON.parse(row.data) : {};
+                if (!row && this.snap.has(a.id)) continue; // deleted by another process since we loaded it: don't resurrect
+                for (const k of new Set([...Object.keys(before), ...Object.keys(a)])) {
+                    if (JSON.stringify(a[k]) === JSON.stringify(before[k])) continue;
+                    if (a[k] === undefined) delete cur[k]; else cur[k] = a[k];
+                }
+                put.run(a.id, JSON.stringify(cur));
+            }
+        });
+        for (const a of changed) this.snap.set(a.id, JSON.stringify(a));
+    }
+    /** Delete sign-ups never confirmed within `days` of their last sign-up attempt (written immediately). Returns the count. */
+    purgeUnconfirmed(days = 7) {
+        const cut = new Date(this.now() - days * 864e5).toISOString();
+        const ids = tx(this.sql, () => {
+            const gone = this.sql.prepare("DELETE FROM accounts WHERE json_extract(data, '$.confirmed') = 0 AND coalesce(json_extract(data, '$.pendingConsent.at'), json_extract(data, '$.createdAt')) < ? RETURNING id").all(cut).map((r) => r.id);
+            for (const id of gone) this.sql.prepare('DELETE FROM tokens WHERE account_id = ?').run(id);
+            return gone;
+        });
+        for (const id of ids) { delete this.db.accounts[id]; this.snap.delete(id); }
+        return ids.length;
+    }
     get(id) { return this.db.accounts[id] ?? null; }
     byEmail(email) { const e = normEmail(email); return Object.values(this.db.accounts).find((a) => a.email === e) ?? null; }
     byStripeCustomer(cus) { return Object.values(this.db.accounts).find((a) => a.stripeCustomer === cus) ?? null; }
@@ -95,25 +164,63 @@ export class Accounts {
         a.pendingConsent = { text: consentText, at: new Date(this.now()).toISOString() };
         return { account: a, confirmToken: this.issue(a.id, 'confirm') };
     }
-    issue(accountId, kind) { const t = token(); this.db.tokens[hash(t)] = { accountId, kind, exp: this.now() + TOKEN_TTL_MS[kind] }; this.prune(); return t; }
-    prune() { for (const [k, v] of Object.entries(this.db.tokens)) if (v.exp < this.now()) delete this.db.tokens[k]; }
+    // Tokens are written straight to the database (no save() needed).
+    issue(accountId, kind) { const t = token(); this.sql.prepare('INSERT INTO tokens VALUES (?, ?, ?, ?)').run(hash(t), accountId, kind, this.now() + TOKEN_TTL_MS[kind]); this.prune(); return t; }
+    prune() { this.sql.prepare('DELETE FROM tokens WHERE exp < ?').run(this.now()); }
     /** Look up a token; confirm tokens are single use, manage tokens stay valid until expiry. */
     use(t, kind) {
-        const rec = this.db.tokens[hash(t)];
+        const h = hash(t); const rec = this.sql.prepare('SELECT account_id, kind, exp FROM tokens WHERE hash = ?').get(h);
         if (!rec || rec.kind !== kind || rec.exp < this.now()) return null;
-        if (kind === 'confirm') delete this.db.tokens[hash(t)];
-        return this.get(rec.accountId);
+        if (kind === 'confirm' && !this.sql.prepare('DELETE FROM tokens WHERE hash = ?').run(h).changes) return null;
+        return this.get(rec.account_id);
     }
     confirm(t) {
         const a = this.use(t, 'confirm'); if (!a) return null;
-        a.confirmed = true; a.unsubscribed = false;
+        a.confirmed = true; a.unsubscribed = false; delete a.deleteAt;
         a.consent = a.pendingConsent ?? a.consent; a.consent.confirmedAt = new Date(this.now()).toISOString();
         delete a.pendingConsent; return a;
+    }
+    // ---- Deletion: requested on the manage page or by unsubscribing, carried out DELETE_GRACE_DAYS later by the daily
+    // run (purgeDeleted). Checks and emails stop at once; "keep" cancels it. A running paid plan is never deleted.
+    scheduleDeletion(a) { a.deleteAt ??= new Date(this.now() + DELETE_GRACE_DAYS * 864e5).toISOString(); return a.deleteAt; }
+    keep(a) { delete a.deleteAt; a.unsubscribed = false; }
+    liveSubscription(a) { return Boolean(a.subscription && a.plan !== 'free'); }
+    /** Delete an account now: its row, its tokens and all its files. Written immediately. */
+    erase(id) {
+        deleteAccountFiles(path.dirname(this.file), id, this.addresses(this.fresh(id))); // files first: if this fails the row stays, so it can be retried
+        tx(this.sql, () => { this.sql.prepare('DELETE FROM accounts WHERE id = ?').run(id); this.sql.prepare('DELETE FROM tokens WHERE account_id = ?').run(id); });
+        delete this.db.accounts[id]; this.snap.delete(id);
+    }
+    /** Every address this account mails: the owner and its clients' recipients. */
+    addresses(a) { return a ? [a.email, ...(a.clients ?? []).flatMap((c) => (c.recipients ?? []).map((r) => r.email))].filter(Boolean) : []; }
+    /** The account as stored right now (not this instance's copy, which may be hours old in the daily run), or null. */
+    fresh(id) { const r = this.sql.prepare('SELECT data FROM accounts WHERE id = ?').get(id); return r ? JSON.parse(r.data) : null; }
+    /**
+     * Daily: schedule unsubscribed accounts that have no date yet, delete the ones that are due. Decides on the rows
+     * as they are now, in one transaction (not on this instance's copies, which may be hours old in the daily run),
+     * so a "keep", a resubscribe or a new subscription made meanwhile always wins.
+     */
+    purgeDeleted() {
+        const out = { deleted: [], waiting: [], failed: [] }; const nowIso = new Date(this.now()).toISOString();
+        tx(this.sql, () => {
+            for (const r of this.sql.prepare('SELECT id, data FROM accounts').all()) {
+                const a = JSON.parse(r.data);
+                if (a.unsubscribed && !a.deleteAt) { this.scheduleDeletion(a); this.sql.prepare('UPDATE accounts SET data = ? WHERE id = ?').run(JSON.stringify(a), a.id); }
+                if (!a.deleteAt || a.deleteAt > nowIso) continue;
+                if (this.liveSubscription(a)) { out.waiting.push(a.id); continue; } // deleted once Stripe ends the plan
+                // Files first: if removing them fails, the row stays and tomorrow's run retries; other accounts go on.
+                try { deleteAccountFiles(path.dirname(this.file), a.id, this.addresses(a)); } catch (e) { out.failed.push(`${a.id}: ${e.message}`); continue; }
+                this.sql.prepare('DELETE FROM accounts WHERE id = ?').run(a.id); this.sql.prepare('DELETE FROM tokens WHERE account_id = ?').run(a.id);
+                out.deleted.push(a.id);
+            }
+        });
+        for (const id of out.deleted) { delete this.db.accounts[id]; this.snap.delete(id); }
+        return out;
     }
     setIcos(a, icos, websites = {}) { return this.setIcosMain(a, icos, websites); }
     unsubscribe(t) {
         if (!t) return null;
-        const a = this.all().find((x) => x.unsubToken === t); if (a) { a.unsubscribed = true; return a; }
+        const a = this.all().find((x) => x.unsubToken === t); if (a) { a.unsubscribed = true; this.scheduleDeletion(a); return a; }
         for (const acc of this.all()) for (const c of acc.clients ?? []) for (const r of c.recipients ?? []) if (r.unsubToken === t) { r.unsubscribed = true; return acc; }
         return null;
     }
@@ -187,15 +294,20 @@ export class Accounts {
         if (ev.type === 'checkout.session.completed') {
             const a = (o.client_reference_id && this.get(o.client_reference_id)) || this.byEmail(o.customer_details?.email ?? o.customer_email);
             if (!a) return null;
-            a.plan = meta(o.metadata) ?? 'starter'; a.stripeCustomer = o.customer ?? a.stripeCustomer; a.subscription = o.subscription ?? null;
-            return `${a.id} -> ${a.plan}`;
+            const replaced = a.subscription && o.subscription && a.subscription !== o.subscription ? a.subscription : null;
+            a.plan = meta(o.metadata) ?? PLAN_BY_AMOUNT[o.amount_subtotal] ?? 'starter'; a.stripeCustomer = o.customer ?? a.stripeCustomer; a.subscription = o.subscription ?? null;
+            return `${a.id} -> ${a.plan}${replaced ? ` (WARNING: previous subscription ${replaced} may still be billing)` : ''}`;
         }
         if (ev.type === 'customer.subscription.updated' || ev.type === 'customer.subscription.deleted') {
             const a = this.byStripeCustomer(o.customer); if (!a) return null;
+            if (a.subscription && o.id && o.id !== a.subscription) return null; // an old/other subscription must not change the plan
             const active = ev.type === 'customer.subscription.updated' && ['active', 'trialing', 'past_due'].includes(o.status);
             const price = o.items?.data?.[0]?.price;
-            a.plan = active ? (meta(o.metadata) ?? meta(price?.metadata) ?? PLAN_BY_AMOUNT[price?.unit_amount] ?? a.plan) : 'free';
-            if (!active) a.subscription = null;
+            // The current price decides: subscription metadata is set at checkout and not updated by a portal plan switch.
+            a.plan = active ? (meta(price?.metadata) ?? PLAN_BY_AMOUNT[price?.unit_amount] ?? meta(o.metadata) ?? a.plan) : 'free';
+            // The subscription id is the account's identity at Stripe, kept through unpaid / past-due spells (so events of
+            // another subscription stay rejected) and cleared only when this subscription is deleted.
+            a.subscription = ev.type === 'customer.subscription.deleted' ? null : (o.id ?? a.subscription);
             // cancel_at_period_end: plan stays until Stripe sends subscription.deleted at period end.
             a.cancelAt = active && o.cancel_at_period_end ? (o.cancel_at ?? o.current_period_end ?? o.items?.data?.[0]?.current_period_end ?? null) : null;
             // Over the new limit: keep the first N; the rest stay stored so an upgrade restores them.

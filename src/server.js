@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // Supplier Watch web app. Listens on 127.0.0.1 behind the web server and serves:
-//   static site, /terms.html, /privacy.html, POST /signup, GET /confirm, POST /manage-link,
+//   static site, /terms.html, /privacy.html, POST /signup, GET+POST /confirm, POST /manage-link,
 //   GET+POST /check (free one-off check), GET+POST /manage, GET+POST /unsubscribe, POST /stripe/webhook, GET /healthz
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifySignature } from './billing.js';
-import { Accounts, PLANS, parseSupplierForm, validEmail, normEmail, suppliersText } from './accounts.js';
+import { Accounts, PLANS, DELETE_GRACE_DAYS, parseSupplierForm, validEmail, normEmail, suppliersText } from './accounts.js';
 import { createMailer } from './mailer.js';
-import { createFreeCheck, checkPageHtml } from './freecheck.js';
+import { createFreeCheck, checkPageHtml, RateLimiter, clientIp } from './freecheck.js';
 import { createApi } from './api.js';
 import { PLAN_INFO } from './plans.js';
 import { historyMonths, validMonth } from './history.js';
@@ -46,7 +46,7 @@ export function createServer({
     const links = { starter: env.STRIPE_LINK_STARTER || 'https://buy.stripe.com/test_3cIdR9dpr1vZ5YWbic1ZS00', pro: env.STRIPE_LINK_PRO || 'https://buy.stripe.com/test_bJe28rdprb6z0ECdqk1ZS01', accountant: env.STRIPE_LINK_ACCOUNTANT || ACCOUNTANT_TEST_LINK };
     const handleApi = createApi({ dataDir, env, now, log });
     const stripeKey = env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY;
-    const canBill = (a) => Boolean(stripeKey && a.stripeCustomer && a.plan !== 'free');
+    const canBill = (a) => Boolean(stripeKey && a.stripeCustomer && (a.plan !== 'free' || a.subscription)); // an unpaid subscription is fixed in the portal
     const billingBtn = (a, t) => (canBill(a) ? `<form method="post" action="/manage"><input type="hidden" name="t" value="${esc(t)}"><input type="hidden" name="action" value="billing"><button>Manage billing / cancel · Správa plateb / zrušení</button></form>${a.cancelAt ? `<p><strong>Your plan is set to end on ${esc(new Date(a.cancelAt * 1000).toISOString().slice(0, 10))}, then moves to free. / Tarif skončí ${esc(new Date(a.cancelAt * 1000).toISOString().slice(0, 10))}.</strong></p>` : ''}` : '');
     const portal = stripePortal ?? (async (customer, returnUrl) => {
         const r = await fetch('https://api.stripe.com/v1/billing_portal/sessions', { method: 'POST', headers: { authorization: `Bearer ${stripeKey}`, 'content-type': 'application/x-www-form-urlencoded' },
@@ -54,15 +54,24 @@ export function createServer({
         const j = await r.json(); if (!r.ok || !j.url) throw new Error(j.error?.message ?? `stripe ${r.status}`); return j.url;
     });
     const lastMail = new Map(); // email -> ms, simple anti-abuse cooldown
-    const cooldown = (kind, email) => { const k = `${kind}:${email}`; const t = lastMail.get(k); if (t && now() - t < 60e3) return true; lastMail.set(k, now()); return false; };
+    const cooldown = (kind, email) => {
+        const k = `${kind}:${email}`; const t = lastMail.get(k); if (t && now() - t < 60e3) return true;
+        if (lastMail.size > 10000) for (const [x, at] of lastMail) if (now() - at >= 60e3) lastMail.delete(x);
+        lastMail.set(k, now()); return false;
+    };
+    // Sign-up and manage-link requests send email to any address: cap them per IP, and globally to protect the mail quota.
+    const mailLimit = new RateLimiter({ perIp: Number(env.MAIL_FORM_PER_IP || 10), global: Number(env.MAIL_FORM_GLOBAL || 300), now });
+    const tooMany = (send) => send(429, page('Too many requests', '<p>Too many requests from your network. Please try again in an hour. / Příliš mnoho požadavků, zkuste to prosím za hodinu.</p>'));
     const unsubUrl = (a) => `${baseUrl}/unsubscribe?t=${a.unsubToken}`;
     const checkoutUrl = (a, plan) => `${links[plan]}?client_reference_id=${encodeURIComponent(a.id)}&prefilled_email=${encodeURIComponent(a.email)}`;
     const SCRIPTS = '<script src="/csvimport.js"></script><script src="/suppliers.js"></script>';
     const hidden = (t, extra = {}) => `<input type="hidden" name="t" value="${esc(t)}">${Object.entries(extra).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('')}`;
     const mlink = (t, params = {}) => `/manage?${new URLSearchParams({ t, ...params })}`;
-    const upgradeHtml = (a) => {
+    const upgradeHtml = (a, t) => {
         const opts = ['starter', 'pro', 'accountant'].filter((p) => PLAN_INFO[p].limit > PLAN_INFO[a.plan].limit && links[p]);
         if (!opts.length) return '';
+        // A paid subscription changes plan in the Stripe portal; a new Checkout would start a second subscription.
+        if (a.subscription) return canBill(a) ? `<h2>Upgrade</h2><form method="post" action="/manage">${hidden(t, { action: 'billing' })}<button>Change plan / Změnit tarif</button></form>` : '<h2>Upgrade</h2><p>To change your plan, write to <a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>.</p>';
         const label = { starter: 'Starter: 50 suppliers, 190 Kč / month', pro: 'Pro: 500 suppliers + API, 490 Kč / month', accountant: 'Accountant: 2,000 suppliers, client lists + API, 990 Kč / month' };
         return `<h2>Upgrade</h2><p>${opts.map((p) => `<a class="cta" href="${esc(checkoutUrl(a, p))}">${label[p]}</a>`).join(' ')}</p>`;
     };
@@ -86,10 +95,18 @@ ${keys.length ? `<table class="t"><tr><th>Key</th><th>Label</th><th>Created</th>
 ${cl.length ? `<table class="t"><tr><th>Client</th><th>Suppliers</th><th>Extra recipients</th></tr>${cl.map((c) => `<tr><td><a href="${esc(mlink(t, { client: c.id }))}">${esc(c.name)}</a></td><td>${c.icos.length}</td><td>${(c.recipients ?? []).map((r) => esc(r.email) + (r.unsubscribed ? ' (unsubscribed)' : '')).join(', ') || '-'}</td></tr>`).join('')}</table>` : '<p class="muted">No clients yet.</p>'}
 <form method="post" action="/manage">${hidden(t, { action: 'add_client' })}<input name="name" maxlength="120" required placeholder="client name, e.g. Novák s.r.o."> <button>Add client</button></form>`;
     };
+    const day = (iso) => esc(String(iso).slice(0, 10));
+    const pendingHtml = (a, t) => (a.deleteAt ? `<div class="box"><p><strong>Your account is scheduled for deletion on ${day(a.deleteAt)}.</strong> Checks and emails are stopped until then. / Účet bude smazán ${day(a.deleteAt)}, kontroly a e-maily jsou zastaveny.</p><form method="post" action="/manage">${hidden(t, { action: 'keep_account' })}<button>Keep my account / Ponechat účet</button></form></div>` : '');
+    const deletionHtml = (acc, a, t) => {
+        if (a.deleteAt) return '';
+        if (acc.liveSubscription(a) && !a.cancelAt) return '<h2>Delete account / Smazat účet</h2><p>Cancel your paid plan first with the Manage billing button, then you can delete your account here. / Nejprve zrušte placený tarif.</p>';
+        return `<h2>Delete account / Smazat účet</h2><p>This stops all checks and emails now, and ${DELETE_GRACE_DAYS} days later deletes your account, supplier and client lists, check history and monthly reports${a.cancelAt ? ` (or after your paid plan ends on ${day(new Date(a.cancelAt * 1000).toISOString())}, if later)` : ''}. Until then you can keep your account from this page. Download any monthly reports you need first. Invoices stay with our payment provider as the law requires.<br>Zastaví kontroly a e-maily a po ${DELETE_GRACE_DAYS} dnech smaže účet a všechna data. Do té doby můžete účet ponechat.</p>
+<form method="post" action="/manage">${hidden(t, { action: 'delete_account' })}<label><input type="checkbox" name="sure" value="1" required> I want to delete my account / Chci smazat účet</label> <button>Delete my account / Smazat účet</button></form>`;
+    };
     const manageHtml = (acc, a, t, note = '', { newKey } = {}) => {
         const used = acc.total(a); const lim = acc.limit(a);
         const room = Math.max(a.icos.length, lim - acc.total(a, 'main'));
-        return page('Your suppliers', `<h1>Your suppliers / Vaši dodavatelé</h1>${note}
+        return page('Your suppliers', `<h1>Your suppliers / Vaši dodavatelé</h1>${note}${pendingHtml(a, t)}
 <p>${esc(a.email)} · plan <strong>${esc(PLAN_INFO[a.plan]?.name ?? a.plan)}</strong> · ${used} of ${lim.toLocaleString('en-US')} suppliers used${a.unsubscribed ? ' · <strong>alerts paused (unsubscribed)</strong>' : ''}</p>
 ${acc.hasClients(a) ? '<h2>Your own suppliers</h2>' : ''}<form method="post" action="/manage">${hidden(t)}
 ${supplierFields(a.icos, a.websites, room)}
@@ -98,8 +115,8 @@ ${a.unsubscribed ? '<label><input type="checkbox" name="resubscribe" value="1"> 
 ${clientsHtml(acc, a, t)}
 ${reportsHtml(a, t)}
 ${keysHtml(a, t, newKey)}
-${upgradeHtml(a)}
-${billingBtn(a, t)}<p class="muted">You can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.<br>Tarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.</p>`);
+${upgradeHtml(a, t)}
+${billingBtn(a, t)}${deletionHtml(acc, a, t)}<p class="muted">You can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.<br>Tarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.</p>`);
     };
     const clientHtml = (acc, a, c, t, note = '') => {
         const room = Math.max(c.icos.length, acc.limit(a) - acc.total(a, c.id));
@@ -145,6 +162,7 @@ ${reportsHtml(a, t, c.id)}
             if (!validEmail(email)) return send(400, page('Error', '<p>Please enter a valid email. / Zadejte platný e-mail.</p><p><a href="/#signup">Back</a></p>'));
             if (f.consent !== 'yes') return send(400, page('Error', '<p>Please tick the consent box. / Zaškrtněte prosím souhlas.</p><p><a href="/#signup">Back</a></p>'));
             if (f.fax) return send(200, page('Check your email', '<p>Check your email.</p>')); // honeypot
+            if (!mailLimit.allow(clientIp(req))) return tooMany(send);
             const { icos, websites, invalid } = parseSupplierForm(new URLSearchParams(body));
             if (!icos.length) return send(400, page('Error', `<p>No valid IČO found. / Nenalezeno žádné platné IČO.${invalid.length ? ` Invalid: ${esc(invalid.join(', '))}` : ''}</p><p><a href="/#signup">Back</a></p>`));
             const acc = new Accounts(accFile, { now });
@@ -157,8 +175,10 @@ ${reportsHtml(a, t, c.id)}
             return send(200, page('Check your email', `<h1>Check your email / Zkontrolujte e-mail</h1><p>We sent a confirmation link to ${esc(email)}.</p>${capped}${invalid.length ? `<p>Ignored invalid IČO: ${esc(invalid.join(', '))}</p>` : ''}`));
         }
 
-        if (req.method === 'GET' && P === '/confirm') {
-            const acc = new Accounts(accFile, { now }); const a = acc.confirm(url.searchParams.get('t'));
+        if (P === '/confirm') { // only POST confirms: mail link scanners (GET, HEAD) must not use up the single-use link
+            const t = url.searchParams.get('t') || form().t;
+            if (req.method !== 'POST') return send(200, page('Confirm your email', `<h1>Confirm your email / Potvrďte e-mail</h1><form method="post" action="/confirm">${hidden(t)}<button>Confirm and start daily checks / Potvrdit</button></form>`));
+            const acc = new Accounts(accFile, { now }); const a = acc.confirm(t);
             if (!a) return send(400, page('Link expired', '<p>This link is invalid or expired. Sign up again on the <a href="/#signup">home page</a>.</p>'));
             const mt = acc.issue(a.id, 'manage'); acc.save();
             return send(200, manageHtml(acc, a, mt, '<p><strong>Email confirmed. Daily checks start tomorrow at 06:30 Prague time. / E-mail potvrzen.</strong></p>'));
@@ -174,6 +194,7 @@ ${reportsHtml(a, t, c.id)}
         }
 
         if (req.method === 'POST' && P === '/manage-link') {
+            if (!mailLimit.allow(clientIp(req))) return tooMany(send);
             const email = normEmail(form().email); const acc = new Accounts(accFile, { now }); const a = acc.byEmail(email);
             if (a?.confirmed && !cooldown("manage", email)) {
                 const t = acc.issue(a.id, 'manage'); acc.save();
@@ -187,7 +208,7 @@ ${reportsHtml(a, t, c.id)}
             const t = req.method === 'POST' ? f.t : url.searchParams.get('t');
             const acc = new Accounts(accFile, { now }); const a = t && acc.use(t, 'manage');
             if (!a) return send(400, page('Link expired', '<p>This link is invalid or expired.</p><form method="post" action="/manage-link"><input name="email" type="email" placeholder="email" required> <button>Send a new link</button></form>'));
-            if (req.method === 'GET') {
+            if (req.method !== 'POST') { // GET and HEAD only read; anything else falling through would save an empty list
                 const rep = url.searchParams.get('report'); const cid = url.searchParams.get('client');
                 if (cid && !acc.client(a, cid)) return send(404, page('Not found', '<p>No such client.</p>'));
                 if (rep) {
@@ -204,6 +225,17 @@ ${reportsHtml(a, t, c.id)}
                 const r = acc.createApiKey(a, f.label); acc.save();
                 return send(r.error ? 400 : 200, manageHtml(acc, a, t, r.error ? `<p class="sw-err">${esc(r.error)}</p>` : '<p><strong>API key created.</strong></p>', { newKey: r.key }));
             }
+            if (action === 'delete_account') {
+                if (f.sure !== '1') return send(400, manageHtml(acc, a, t, '<p class="sw-err">Tick the box to confirm. / Potvrďte zaškrtnutím.</p>'));
+                if (acc.liveSubscription(a) && !a.cancelAt) return send(400, manageHtml(acc, a, t, '<p class="sw-err">Cancel your paid plan first. / Nejprve zrušte placený tarif.</p>'));
+                const when = acc.scheduleDeletion(a).slice(0, 10); acc.save(); log(`deletion requested: ${a.id} on ${when}`);
+                try {
+                    await mailer.send({ to: a.email, unsubscribeUrl: unsubUrl(a), subject: 'Your Supplier Watch account will be deleted / Účet bude smazán',
+                        text: `Your Supplier Watch account (${a.email}) and all its data will be deleted on ${when}. Daily checks and emails have stopped.\nTo keep your account, request a link at ${baseUrl}/#manage and click "Keep my account".\n\nVáš účet Supplier Watch (${a.email}) a všechna jeho data budou smazány ${when}. Kontroly a e-maily jsou zastaveny.\nPokud chcete účet ponechat, vyžádejte si odkaz na ${baseUrl}/#manage a klikněte na „Ponechat účet“.` });
+                } catch (e) { log(`deletion mail failed for ${a.id}: ${e.message}`); }
+                return send(200, manageHtml(acc, a, t, '<p><strong>Deletion scheduled. We sent you a confirmation email. / Smazání naplánováno.</strong></p>'));
+            }
+            if (action === 'keep_account') { acc.keep(a); acc.save(); log(`deletion cancelled: ${a.id}`); return send(200, manageHtml(acc, a, t, '<p><strong>Your account is kept; daily checks and emails resume. / Účet ponechán.</strong></p>')); }
             if (action === 'revoke_key') { const ok = acc.revokeApiKey(a, f.key); acc.save(); return send(ok ? 200 : 400, manageHtml(acc, a, t, ok ? '<p><strong>API key revoked.</strong></p>' : '<p class="sw-err">Key not found.</p>')); }
             if (action === 'add_client') {
                 const r = acc.addClient(a, f.name); if (r.error) return send(400, manageHtml(acc, a, t, `<p class="sw-err">${esc(r.error)}</p>`));
@@ -220,17 +252,20 @@ ${reportsHtml(a, t, c.id)}
                 return send(200, clientHtml(acc, a, c, t, note));
             }
             const r = acc.setIcos(a, icos, websites);
-            if (f.resubscribe === '1') a.unsubscribed = false;
+            if (f.resubscribe === '1') acc.keep(a);
             acc.save();
             const note = `<p><strong>Saved ${r.kept} suppliers.</strong>${r.dropped ? ` ${r.dropped} over your plan limit were not saved; upgrade below.` : ''}${invalid.length ? ` Ignored invalid: ${esc(invalid.join(', '))}` : ''}</p>`;
             return send(200, manageHtml(acc, a, t, note));
         }
 
-        if (P === '/unsubscribe') { // GET shows a button (link scanners must not unsubscribe), POST does it (also RFC 8058 one-click)
+        if (P === '/unsubscribe') { // GET/HEAD show a button (link scanners must not unsubscribe), POST does it (also RFC 8058 one-click)
             const t = url.searchParams.get('t') || form().t;
-            if (req.method === 'GET') return send(200, page('Unsubscribe', `<form method="post" action="/unsubscribe?t=${esc(t)}"><p>Stop all Supplier Watch emails? / Zastavit všechny e-maily?</p><button>Unsubscribe / Odhlásit</button></form>`));
+            if (req.method !== 'POST') return send(200, page('Unsubscribe', `<form method="post" action="/unsubscribe?t=${esc(t)}"><p>Stop all Supplier Watch emails? / Zastavit všechny e-maily?</p><button>Unsubscribe / Odhlásit</button></form>`));
             const acc = new Accounts(accFile, { now }); const a = acc.unsubscribe(t); if (a) acc.save();
-            return send(a ? 200 : 400, page('Unsubscribe', a ? '<p>You\'re unsubscribed and won\'t get any more emails. This doesn\'t cancel a paid plan. You can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.</p><p>Odhlášení proběhlo, další e-maily už nedostanete. Placený tarif tím zrušen není. Tarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.</p>' : '<p>Unknown link.</p>'));
+            if (!a) return send(400, page('Unsubscribe', '<p>Unknown link.</p>'));
+            if (a.unsubToken !== t) return send(200, page('Unsubscribe', '<p>You\'re unsubscribed and won\'t get any more emails from this list. / Odhlášení proběhlo, další e-maily už nedostanete.</p>')); // a client's extra recipient
+            const paid = acc.liveSubscription(a) ? '<p>You have a paid plan: unsubscribing does not cancel it. Cancel it with the Manage billing button on your manage page; your account is deleted after the plan ends. / Placený tarif tím zrušen není, zrušte ho tlačítkem Správa plateb.</p>' : '';
+            return send(200, page('Unsubscribe', `<p>You're unsubscribed and won't get any more emails. Your account and its data (supplier lists, check history, monthly reports) will be deleted on ${day(a.deleteAt)}. To keep your account, request a link on the <a href="/#manage">home page</a> and click "Keep my account".</p><p>Odhlášení proběhlo, další e-maily už nedostanete. Účet a jeho data budou smazány ${day(a.deleteAt)}. Pokud chcete účet ponechat, vyžádejte si odkaz na <a href="/#manage">úvodní stránce</a> a klikněte na „Ponechat účet“.</p>${paid}`));
         }
 
         if (req.method === 'GET' && (P === '/terms.html' || P === '/privacy.html')) {

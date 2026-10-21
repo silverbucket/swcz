@@ -7,10 +7,10 @@
     "supplier-monitor": "src/cli.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   },
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test",
     "check": "node src/cli.js check"
   },
   "dependencies": {

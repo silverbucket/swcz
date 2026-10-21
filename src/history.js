@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const DEFAULT_HISTORY_MONTHS = 24;
+export const REPORT_DAYS = 30; // data/reports/: a debugging copy of each daily run's results
 export const SOURCES = ['ares', 'vat', 'accounts', 'isir', 'coi'];
 
 /** "YYYY-MM" of a date in Europe/Prague. */
@@ -59,7 +60,24 @@ export function historyMonths(dataDir, accountId) {
     const d = dirFor(dataDir, accountId); if (!fs.existsSync(d)) return [];
     return fs.readdirSync(d).map((f) => f.match(/^(\d{4}-\d{2})\.jsonl$/)?.[1]).filter(Boolean).sort().reverse();
 }
-/** Delete history (and stored PDF reports) older than `months` full months. Returns files removed. */
+/** Remove every file of an account: list snapshots, check history, monthly PDFs, daily report files, and outbox mail to `emails`. */
+export function deleteAccountFiles(dataDir, accountId, emails = []) {
+    const id = String(accountId).replace(/[^\w-]/g, ''); if (!id) return;
+    const outbox = path.join(dataDir, 'outbox'); // dry-run mail (mailer.js): <ms>-<rand>.json plus <ms>-<rand>-<n>-<file> attachments
+    if (emails.length && fs.existsSync(outbox)) for (const f of fs.readdirSync(outbox)) {
+        if (!f.endsWith('.json')) continue;
+        let m; try { m = JSON.parse(fs.readFileSync(path.join(outbox, f), 'utf8')); } catch { continue; }
+        if (!emails.includes(m.to)) continue;
+        for (const a of m.attachments ?? []) if (a.file) fs.rmSync(path.join(outbox, path.basename(a.file)), { force: true });
+        fs.rmSync(path.join(outbox, f), { force: true });
+    }
+    for (const sub of ['history', 'monthly']) fs.rmSync(path.join(dataDir, sub, id), { recursive: true, force: true });
+    for (const sub of ['state', 'reports']) { // <id>.json, <id>--<client>.json, <id>-<date>.txt ...
+        const d = path.join(dataDir, sub); if (!fs.existsSync(d)) continue;
+        for (const f of fs.readdirSync(d)) if (f.startsWith(`${id}.`) || f.startsWith(`${id}-`)) fs.rmSync(path.join(d, f), { force: true });
+    }
+}
+/** Delete history (and stored PDF reports) older than `months` full months, and daily report files and outbox mail older than REPORT_DAYS. Returns files removed. */
 export function pruneHistory(dataDir, months = DEFAULT_HISTORY_MONTHS, now = new Date()) {
     let cut = pragueMonth(now); for (let i = 0; i < months; i++) cut = prevMonth(cut);
     let n = 0;
@@ -70,5 +88,12 @@ export function pruneHistory(dataDir, months = DEFAULT_HISTORY_MONTHS, now = new
             if (m && m < cut) { fs.rmSync(path.join(root, acc, f)); n++; }
         }
     }
+    const reports = path.join(dataDir, 'reports'); const cutDay = new Date(now.getTime() - REPORT_DAYS * 864e5).toISOString().slice(0, 10);
+    if (fs.existsSync(reports)) for (const f of fs.readdirSync(reports)) { // <list>-YYYY-MM-DD.json / .txt
+        const day = f.match(/-(\d{4}-\d{2}-\d{2})\.(json|txt)$/)?.[1];
+        if (day && day < cutDay) { fs.rmSync(path.join(reports, f)); n++; }
+    }
+    const outbox = path.join(dataDir, 'outbox'); const cutMs = now.getTime() - REPORT_DAYS * 864e5;
+    if (fs.existsSync(outbox)) for (const f of fs.readdirSync(outbox)) { const ms = Number(f.match(/^(\d{13})-/)?.[1]); if (ms && ms < cutMs) { fs.rmSync(path.join(outbox, f)); n++; } }
     return n;
 }

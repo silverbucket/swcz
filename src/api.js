@@ -7,19 +7,21 @@ import { PLAN_INFO } from './plans.js';
 import { readHistory, pragueMonth, prevMonth } from './history.js';
 import { readStatus } from './canary.js';
 import { isValidIco } from './ico.js';
-import { clientIp } from './freecheck.js';
+import { clientIp, sweepHits } from './freecheck.js';
 
 export const API_VERSION = 'v1';
 const MAX_LIMIT = 200;
 
 export class SlidingLimiter {
-    constructor({ limit, windowMs = 60e3, now = () => Date.now() }) { Object.assign(this, { limit, windowMs, now }); this.hits = new Map(); }
+    constructor({ limit, windowMs = 60e3, now = () => Date.now() }) {
+        Object.assign(this, { limit, windowMs, now }); this.hits = new Map();
+        setInterval(() => sweepHits(this.hits, this.now() - this.windowMs), Math.min(windowMs, 60e3)).unref(); // forget IPs after the window (privacy policy)
+    }
     take(key) {
-        const t = this.now(); const cut = t - this.windowMs;
-        const h = (this.hits.get(key) ?? []).filter((x) => x > cut);
-        if (h.length >= this.limit) { this.hits.set(key, h); return { ok: false, remaining: 0, retryAfter: Math.max(1, Math.ceil((h[0] + this.windowMs - t) / 1000)) }; }
+        const t = this.now(); sweepHits(this.hits, t - this.windowMs);
+        const h = this.hits.get(key) ?? [];
+        if (h.length >= this.limit) return { ok: false, remaining: 0, retryAfter: Math.max(1, Math.ceil((h[0] + this.windowMs - t) / 1000)) };
         h.push(t); this.hits.set(key, h);
-        if (this.hits.size > 5000) for (const [k, v] of this.hits) if (!v.some((x) => x > cut)) this.hits.delete(k);
         return { ok: true, remaining: this.limit - h.length };
     }
 }
@@ -69,6 +71,7 @@ export function createApi({ dataDir, env = process.env, now = () => Date.now(), 
         const a = found.account;
         if (!PLAN_INFO[a.plan]?.api) return { error: err(403, 'plan_required', 'API access needs the Pro or Accountant plan. Upgrade on your manage page.') };
         if (!a.confirmed) return { error: err(403, 'account_not_confirmed', 'Confirm your email address first.') };
+        if (a.deleteAt) return { error: err(403, 'account_pending_deletion', `This account is scheduled for deletion on ${a.deleteAt.slice(0, 10)}. Keep it on your manage page to use the API again.`) };
         if (!found.key.lastUsedAt || now() - Date.parse(found.key.lastUsedAt) > 10 * 60e3) { found.key.lastUsedAt = new Date(now()).toISOString(); try { acc.save(); } catch (e) { log(`api: could not save lastUsedAt: ${e.message}`); } }
         return { acc, account: a, key: found.key };
     }

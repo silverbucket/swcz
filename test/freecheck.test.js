@@ -5,14 +5,19 @@ import os from 'node:os';
 import path from 'node:path';
 import { createServer } from '../src/server.js';
 import { createFreeCheck, RateLimiter, clientIp } from '../src/freecheck.js';
-import { checkWatchlist } from '../src/check.js';
+import { Accounts } from '../src/accounts.js';
+import { cachedSources } from '../src/lookups.js';
+import { runAll } from '../src/run.js';
 
-const sources = {
-    ares: async (ico) => ({ found: true, ico, name: 'Dodavatel s.r.o.', dic: `CZ${ico}`, address: 'Praha 7', dissolved: null }),
-    dph: async (dics) => ({ generated: 'now', subjects: new Map(dics.map((d) => [d, { dic: d, subjectType: 'PLATCE_DPH', unreliable: 'ANO', accounts: ['123-456/0100'] }])) }),
-    isir: async () => ({ cases: [] }),
-};
-const fakeCheck = (calls) => (items, opts) => { calls.push({ items, opts }); return checkWatchlist(items, { ...opts, sources }); };
+// Fake registers that record every request they get.
+const registers = (calls = []) => ({
+    calls,
+    ares: async (ico) => { calls.push(`ares ${ico}`); return { found: true, ico, name: 'Dodavatel s.r.o.', dic: `CZ${ico}`, address: 'Praha 7', dissolved: null }; },
+    vr: async () => null,
+    dph: async (dics) => { calls.push(`dph ${dics}`); return { generated: 'now', subjects: new Map(dics.map((d) => [d, { dic: d, subjectType: 'PLATCE_DPH', unreliable: 'ANO', accounts: ['123-456/0100'] }])) }; },
+    isir: async (ico) => { calls.push(`isir ${ico}`); return { cases: [] }; },
+});
+const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'swfc-'));
 const coiList = { entries: [{ domain: 'bad-shop.cz', reason: 'nekontaktní', listedOn: '2026-01-01' }] };
 
 async function withServer(fc, fn) {
@@ -28,12 +33,15 @@ test('rate limiter: per IP and global caps, window expiry', () => {
     assert.ok(l.allow('a')); assert.ok(l.allow('a')); assert.equal(l.allow('a'), false);
     assert.ok(l.allow('b')); assert.equal(l.allow('c'), false, 'global cap');
     t = 1001; assert.ok(l.allow('a'));
+    assert.deepEqual([...l.hits.keys()], ['a'], 'expired IPs are forgotten');
     assert.equal(clientIp({ headers: { 'x-forwarded-for': '9.9.9.9, 127.0.0.1' } }), '9.9.9.9');
     assert.equal(clientIp({ headers: {}, socket: { remoteAddress: '::1' } }), '::1');
+    assert.equal(clientIp({ headers: { 'x-forwarded-for': '6.6.6.6, 9.9.9.9' } }), '9.9.9.9', 'client-supplied entries are ignored');
+    assert.equal(clientIp({ headers: { 'x-forwarded-for': '6.6.6.6, 9.9.9.9, 10.0.0.2' } }), '9.9.9.9');
 });
 
 test('GET /check shows the form; invalid IČO and website rejected without running checks', async () => {
-    const calls = []; const fc = createFreeCheck({ env: {}, dataDir: '/tmp', check: fakeCheck(calls), loadCoi: async () => coiList });
+    const calls = []; const fc = createFreeCheck({ env: {}, dataDir: tmpDir(), sources: registers(calls), loadCoi: async () => coiList });
     await withServer(fc, async (url) => {
         const g = await fetch(`${url}/check`); const h = await g.text();
         assert.equal(g.status, 200); assert.match(h, /name="ico"/); assert.match(h, /meta name="description"/); assert.doesNotMatch(h, /noindex/);
@@ -44,26 +52,114 @@ test('GET /check shows the form; invalid IČO and website rejected without runni
 });
 
 test('POST /check runs the checks once, shows warnings, ČOI match and signup CTA', async () => {
-    const calls = []; const fc = createFreeCheck({ env: {}, dataDir: '/tmp', check: fakeCheck(calls), loadCoi: async () => coiList });
+    const calls = []; const fc = createFreeCheck({ env: {}, dataDir: tmpDir(), sources: registers(calls), loadCoi: async () => coiList });
     await withServer(fc, async (url) => {
         const r = await post(url, { ico: '27082440', web: 'https://www.bad-shop.cz/x' }); const h = await r.text();
-        assert.equal(r.status, 200); assert.equal(calls.length, 1); assert.equal(calls[0].items[0].ico, '27082440'); assert.equal(calls[0].items[0].website, 'bad-shop.cz');
+        assert.equal(r.status, 200); assert.deepEqual(calls, ['ares 27082440', 'dph 27082440', 'isir 27082440']); assert.match(h, /bad-shop\.cz - nekontaktní/);
         assert.match(h, /Dodavatel s\.r\.o\./); assert.match(h, /UNRELIABLE VAT PAYER/); assert.match(h, /123-456\/0100/);
         assert.match(h, /ČOI list of risky e-shops/); assert.match(h, /Česká obchodní inspekce/); assert.match(h, /href="\/#signup"/); assert.match(h, /not legal or tax advice/);
-        const r2 = await post(url, { ico: '6947' }); assert.equal(r2.status, 200); assert.equal(calls[1].opts.coi, undefined, 'no website: ČOI not loaded');
+        const r2 = await post(url, { ico: '6947' }); assert.equal(r2.status, 200); assert.doesNotMatch(await r2.text(), /ČOI risky e-shops \(/, 'no website: no ČOI row');
     });
 });
 
 test('POST /check is rate-limited per IP; honeypot does not run checks', async () => {
-    const calls = []; const fc = createFreeCheck({ env: {}, dataDir: '/tmp', check: fakeCheck(calls), loadCoi: async () => null, limiter: new RateLimiter({ perIp: 2, global: 100 }) });
+    const calls = []; const fc = createFreeCheck({ env: {}, dataDir: tmpDir(), sources: registers(calls), loadCoi: async () => null, limiter: new RateLimiter({ perIp: 2, global: 100 }) });
     await withServer(fc, async (url) => {
         assert.equal((await post(url, { ico: '27082440' })).status, 200);
-        assert.equal((await post(url, { ico: '27082440' })).status, 200);
-        assert.equal((await post(url, { ico: '27082440' })).status, 429);
-        assert.equal((await post(url, { ico: '27082440' }, '2.2.2.2')).status, 200, 'other IP unaffected');
+        assert.equal((await post(url, { ico: '09970207' })).status, 200);
+        assert.equal((await post(url, { ico: '45274649' })).status, 429);
+        assert.equal((await post(url, { ico: '27082440' })).status, 200, 'already checked today: answered from cache');
+        assert.equal((await post(url, { ico: '45274649' }, '2.2.2.2')).status, 200, 'other IP unaffected');
         await post(url, { ico: '27082440', fax: 'x' }, '3.3.3.3');
-        assert.equal(calls.length, 3);
+        assert.equal(calls.filter((c) => c.startsWith('ares')).length, 3, 'three IČO looked up, each once');
     });
+});
+
+test('POST /check: answers come from the shared cache; failed requests are retried', async () => {
+    let isirUp = false; const reg = registers(); const isir = reg.isir;
+    reg.isir = async (ico) => { if (!isirUp) throw new Error('down'); return isir(ico); };
+    const fc = createFreeCheck({ env: {}, dataDir: tmpDir(), sources: reg, loadCoi: async () => coiList });
+    await withServer(fc, async (url) => {
+        assert.match(await (await post(url, { ico: '27082440' })).text(), /did not answer/); isirUp = true;
+        await post(url, { ico: '27082440' });
+        assert.deepEqual(reg.calls, ['ares 27082440', 'dph 27082440', 'isir 27082440'], 'only the failed ISIR request is repeated');
+        const h = await (await post(url, { ico: '27082440', web: 'bad-shop.cz' })).text();
+        assert.equal(reg.calls.length, 3, 'all cached'); assert.match(h, /LISTED/);
+    });
+});
+
+test('free check reuses the daily run answers; the next daily run invalidates them; 36 h backstop', async () => {
+    const dataDir = tmpDir(); let t = Date.parse('2026-10-21T04:30:00Z'); const now = () => t;
+    const acc = new Accounts(path.join(dataDir, 'accounts.json'));
+    const { confirmToken } = acc.signup('d@x.cz', ['27082440'], { consentText: 'x' }); acc.confirm(confirmToken); acc.save();
+    const runReg = registers();
+    await runAll({ dataDir, mailer: { send: async () => {} }, sources: runReg, canary: null, log: () => {}, now });
+    assert.equal(runReg.calls.length, 3);
+    const freeReg = registers(); const fc = createFreeCheck({ env: {}, dataDir, sources: freeReg, loadCoi: async () => null, now, limiter: new RateLimiter({ perIp: 0, global: 0 }) });
+    await withServer(fc, async (url) => {
+        t += 20 * 3600e3; // next morning, before the daily run
+        const r = await post(url, { ico: '27082440' });
+        assert.equal(r.status, 200, 'cached: no rate limit'); assert.deepEqual(freeReg.calls, [], 'no register request');
+        assert.match(await r.text(), /Register data from 2026-10-21 04:30 UTC/, 'shows when the answer was fetched, not now');
+        t += 3600e3; await runAll({ dataDir, mailer: { send: async () => {} }, sources: runReg, canary: null, log: () => {}, now });
+        assert.equal(runReg.calls.length, 6, 'the daily run always refreshes');
+        t += 37 * 3600e3; // daily run stopped: answers too old to count as fresh, so a request is needed and the limit applies
+        assert.equal((await post(url, { ico: '27082440' })).status, 429);
+    });
+});
+
+test('free check: when a register is down, the last answer is shown with its date and a warning; the daily run never uses it', async () => {
+    const dataDir = tmpDir(); let t = Date.parse('2026-10-21T04:30:00Z'); const now = () => t;
+    const acc = new Accounts(path.join(dataDir, 'accounts.json'));
+    const { confirmToken } = acc.signup('e@x.cz', ['27082440'], { consentText: 'x' }); acc.confirm(confirmToken); acc.save();
+    const reg = registers(); let down = false;
+    const flaky = { ...reg, ares: async (i) => { if (down) throw new Error('down'); return reg.ares(i); }, isir: async (i) => { if (down) throw new Error('down'); return reg.isir(i); }, dph: async (d) => { if (down) throw new Error('down'); return reg.dph(d); } };
+    await runAll({ dataDir, mailer: { send: async () => {} }, sources: flaky, canary: null, log: () => {}, now });
+    down = true; t += 4 * 864e5; // long weekend later, registers down
+    const fc = createFreeCheck({ env: {}, dataDir, sources: flaky, loadCoi: async () => null, now });
+    await withServer(fc, async (url) => {
+        const h = await (await post(url, { ico: '27082440' })).text();
+        assert.match(h, /Dodavatel s\.r\.o\./); assert.match(h, /UNRELIABLE VAT PAYER/);
+        assert.match(h, /last answer we have, from 2026-10-21/); assert.match(h, /Register data from 2026-10-21 04:30 UTC/);
+    });
+    const st = await runAll({ dataDir, mailer: { send: async () => {} }, sources: flaky, canary: null, log: () => {}, now });
+    const rec = fs.readFileSync(path.join(dataDir, 'history', acc.byEmail('e@x.cz').id, '2026-10.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1);
+    assert.equal(rec.checks.ares.status, 'failed', 'monitoring records "not checked", not the old answer'); assert.equal(rec.checks.vat.status, 'failed'); assert.equal(st.checked, 1);
+});
+
+test('review fixes: an old VAT answer is flagged even when ARES and ISIR are fresh; a check needing VAT is not exempt from the limit', async () => {
+    let t = Date.parse('2026-10-21T08:00:00Z'); const reg = registers(); let vatDown = false;
+    const sources = { ...reg, dph: async (d) => { if (vatDown) throw new Error('down'); return reg.dph(d); } };
+    const fc = createFreeCheck({ env: {}, dataDir: tmpDir(), sources, loadCoi: async () => null, now: () => t, limiter: new RateLimiter({ perIp: 2, global: 100 }) });
+    await withServer(fc, async (url) => {
+        await post(url, { ico: '27082440' }); // all fresh, limit 1 of 2
+        t += 37 * 3600e3; vatDown = true;
+        const h = await (await post(url, { ico: '27082440' })).text(); // limit 2 of 2: ARES/ISIR refreshed, VAT from the old answer
+        assert.match(h, /last answer we have, from 2026-10-21/); assert.match(h, /UNRELIABLE VAT PAYER/);
+        assert.equal((await post(url, { ico: '27082440' })).status, 429, 'VAT still not fresh, so this check would hit the register: limited');
+    });
+});
+
+test('review fixes: an old ISIR answer is flagged even when ARES has never answered', async () => {
+    let t = Date.parse('2026-10-21T08:00:00Z'); const reg = registers(); let isirDown = false;
+    const sources = { ...reg, ares: async () => { throw new Error('down'); }, isir: async (i) => { if (isirDown) throw new Error('down'); return reg.isir(i); } };
+    const fc = createFreeCheck({ env: {}, dataDir: tmpDir(), sources, loadCoi: async () => null, now: () => t });
+    await withServer(fc, async (url) => {
+        await post(url, { ico: '27082440' }); // ARES down, ISIR answers
+        t += 37 * 3600e3; isirDown = true;
+        assert.match(await (await post(url, { ico: '27082440' })).text(), /last answer we have, from 2026-10-21/);
+    });
+});
+
+test('review fixes: limiters forget IPs without new traffic and never store refused ones; concurrent VAT lookups share one request', async () => {
+    let t = 0; const l = new RateLimiter({ perIp: 1, global: 1, windowMs: 1000, now: () => t });
+    assert.ok(l.allow('a')); assert.equal(l.allow('b'), false); assert.deepEqual([...l.hits.keys()], ['a'], 'refused IP not stored');
+    t = 1001; l.sweep(); assert.equal(l.hits.size, 0, 'the timer sweep forgets IPs with no further requests');
+    const asked = []; const reg = registers();
+    const lookups = cachedSources(tmpDir(), { sources: { ...reg, dph: async (d) => { asked.push(d.join()); await new Promise((r) => setTimeout(r, 20)); return reg.dph(d); } } });
+    const [x, y] = await Promise.all([lookups.dph(['27082440']), lookups.dph(['27082440', '45274649'])]);
+    assert.ok(x.subjects.has('27082440') && y.subjects.has('27082440') && y.subjects.has('45274649'));
+    assert.deepEqual(asked, ['27082440', '45274649'], 'the second batch asks only for the DIČ not already in flight');
 });
 
 test('static SEO files: guides, sitemap, robots, internal links', async () => {
@@ -82,4 +178,14 @@ test('static SEO files: guides, sitemap, robots, internal links', async () => {
         const home = await (await fetch(`${url}/`)).text(); assert.match(home, /href="\/guides\/"/); assert.match(home, /href="\/check.html"/);
         const st = await (await fetch(`${url}/check.html`)).text(); assert.match(st, /action="\/manage-link\?freecheck=1"/); assert.match(st, /canonical" href="https:\/\/supplierwatch.cz\/check.html/);
     });
+});
+
+test('review fixes: a failed VAT batch of several DIČs (one repeated) rejects once, with no unhandled rejections', async () => {
+    const unhandled = []; const h = (e) => unhandled.push(e); process.on('unhandledRejection', h);
+    try {
+        const lookups = cachedSources(tmpDir(), { sources: { ...registers(), dph: async () => { throw new Error('VAT down'); } } });
+        await assert.rejects(lookups.dph(['27082440', '45274649', '27082440']), /VAT down/);
+        await new Promise((r) => setTimeout(r, 20));
+        assert.deepEqual(unhandled, []);
+    } finally { process.off('unhandledRejection', h); }
 });
