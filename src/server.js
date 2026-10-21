@@ -346,9 +346,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (!process.env.STRIPE_WEBHOOK_SECRET) console.error('warning: STRIPE_WEBHOOK_SECRET not set; all webhooks will be rejected');
     if (!process.env.SMTP_HOST || !process.env.SMTP_PASS) console.error('warning: SMTP_HOST/SMTP_PASS not set; emails are written to DATA_DIR/outbox instead of sent');
     const env = process.env; const dataDir = env.DATA_DIR || 'data'; const on = monitoringEnabled(env);
-    if (!on) { // paused, nobody can reach the billing portal: refuse while someone is still paying
-        const acc = new Accounts(path.join(dataDir, 'accounts.json')); const paying = acc.all().filter((a) => acc.liveSubscription(a) && !a.cancelAt);
-        if (paying.length) { console.error(`SIGNUPS_ENABLED=false but ${paying.length} paid subscription(s) still renew: ${paying.map((a) => a.id).join(', ')}. Cancel them in the Stripe dashboard first (or turn sign-ups back on).`); process.exit(1); }
+    if (!on) { // paused, nobody can reach the billing portal: refuse while any subscription is not set to end (an unpaid one can become active again)
+        const acc = new Accounts(path.join(dataDir, 'accounts.json')); const paying = acc.all().filter((a) => a.subscription && !a.cancelAt);
+        if (paying.length) { console.error(`SIGNUPS_ENABLED=false but ${paying.length} Stripe subscription(s) are not cancelled: ${paying.map((a) => a.id).join(', ')}. Cancel them in the Stripe dashboard first (or turn sign-ups back on).`); process.exit(1); }
     }
     const siteDir = env.SITE_DIR || path.join(dataDir, 'site'); // nginx root
     console.log(`monitoring ${on ? 'enabled' : 'PAUSED'}; wrote ${writeSite(path.join(ROOT, 'site'), siteDir, on)} site files to ${siteDir}`);

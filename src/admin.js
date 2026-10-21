@@ -6,6 +6,7 @@
 import path from 'node:path';
 import { Accounts, normEmail } from './accounts.js';
 import { Updates } from './updates.js';
+import { deleteOutboxMail } from './history.js';
 
 const [cmd, email] = process.argv.slice(2);
 const file = path.join(process.env.DATA_DIR || 'data', 'accounts.json');
@@ -18,6 +19,7 @@ if (cmd === 'updates') {
 if (cmd !== 'delete' || !email) { console.error('usage: node src/admin.js delete <email> | updates'); process.exit(2); }
 const acc = new Accounts(file);
 const a = acc.byEmail(email);
+deleteOutboxMail(path.dirname(file), [normEmail(email)]); // the updates confirmation mail, if SMTP is off; first, so a failure leaves it retryable
 const onList = new Updates(file).remove(email);
 if (onList) console.log(`removed ${normEmail(email)} from the updates list`);
 if (!a) { if (!onList) { console.error(`no account and not on the updates list: ${email}`); process.exit(1); } process.exit(0); }

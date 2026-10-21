@@ -135,6 +135,10 @@ test('monitoring sign-up with the updates box ticked joins the updates list when
         await post(`${url}/signup`, { email: 'd@firma.cz', consent: 'yes', ico: '27082440', updates_optin: 'yes' }); // cooldown: no second mail
         assert.equal((await post(`${url}/confirm`, `t=${own}`)).status, 200);
         assert.equal(updates(dataDir).get('d@firma.cz'), null);
+        // confirming one link keeps the choice of another pending link
+        const acc = accounts(dataDir); const t1 = acc.signup('e@firma.cz', ['27082440'], {}).confirmToken;
+        const { account: e, confirmToken: t2 } = acc.signup('e@firma.cz', ['27082440'], { updatesOptIn: true });
+        assert.equal(acc.takeUpdatesOptIn(e, t1), false); assert.equal(acc.takeUpdatesOptIn(e, t2), true); assert.equal(e.updatesOptIn, undefined);
         // the updates form also works while monitoring is on
         assert.equal((await post(`${url}/signup`, { updates: '1', email: 'c@firma.cz', consent: 'yes' })).status, 200);
     } finally { srv.close(); }
@@ -226,15 +230,20 @@ test('admin delete also erases the address from the updates list, and works for 
     const dataDir = tmp('swadm-'); makeAccount(dataDir, 'both@firma.cz'); updates(dataDir).addConfirmed('both@firma.cz'); updates(dataDir).addConfirmed('list@firma.cz');
     let r = node(['src/admin.js', 'delete', 'both@firma.cz'], { DATA_DIR: dataDir });
     assert.equal(r.status, 0, r.stderr); assert.equal(accounts(dataDir).byEmail('both@firma.cz'), null); assert.equal(updates(dataDir).get('both@firma.cz'), null);
+    const outbox = path.join(dataDir, 'outbox'); fs.mkdirSync(outbox);
+    fs.writeFileSync(path.join(outbox, '1-a.json'), JSON.stringify({ to: 'list@firma.cz' })); fs.writeFileSync(path.join(outbox, '2-b.json'), JSON.stringify({ to: 'other@firma.cz' }));
     r = node(['src/admin.js', 'delete', 'LIST@firma.cz'], { DATA_DIR: dataDir });
     assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /removed list@firma.cz from the updates list/); assert.equal(updates(dataDir).get('list@firma.cz'), null);
+    assert.deepEqual(fs.readdirSync(outbox), ['2-b.json'], 'its outbox mail is gone too');
     assert.equal(node(['src/admin.js', 'delete', 'nobody@firma.cz'], { DATA_DIR: dataDir }).status, 1);
 });
 
-test('the app refuses to start paused while a paid subscription still renews', () => {
-    const dataDir = tmp('swpaid-'); const a = makeAccount(dataDir, 'pays@firma.cz', { plan: 'starter' });
-    const acc = accounts(dataDir); acc.get(a.id).subscription = 'sub_1'; acc.save();
-    const r = node(['src/server.js'], { DATA_DIR: dataDir, SITE_DIR: path.join(dataDir, 'site'), SIGNUPS_ENABLED: 'false', PORT: '0', HEALTH_DISABLED: '1' });
-    assert.equal(r.status, 1); assert.match(r.stderr, /1 paid subscription\(s\) still renew: acc_/);
-    assert.equal(fs.existsSync(path.join(dataDir, 'site')), false, 'nothing written');
+test('the app refuses to start paused while a subscription is not cancelled, paid or unpaid', () => {
+    for (const plan of ['starter', 'free']) { // an unpaid subscription drops to free but can become active again
+        const dataDir = tmp('swpaid-'); const a = makeAccount(dataDir, 'pays@firma.cz', { plan });
+        const acc = accounts(dataDir); acc.get(a.id).subscription = 'sub_1'; acc.save();
+        const r = node(['src/server.js'], { DATA_DIR: dataDir, SITE_DIR: path.join(dataDir, 'site'), SIGNUPS_ENABLED: 'false', PORT: '0', HEALTH_DISABLED: '1' });
+        assert.equal(r.status, 1); assert.match(r.stderr, /1 Stripe subscription\(s\) are not cancelled: acc_/);
+        assert.equal(fs.existsSync(path.join(dataDir, 'site')), false, 'nothing written');
+    }
 });

@@ -169,8 +169,11 @@ export class Accounts {
         if (updatesOptIn) a.updatesOptIn = [...(a.updatesOptIn ?? []), hash(confirmToken)].slice(-5);
         return { account: a, confirmToken };
     }
-    /** Whether the sign-up behind confirm token `t` ticked the updates box; forgets all pending opt-ins. */
-    takeUpdatesOptIn(a, t) { const yes = (a.updatesOptIn ?? []).includes(hash(t)); delete a.updatesOptIn; return yes; }
+    /** Whether the sign-up behind confirm token `t` ticked the updates box. Consumes only this link's choice: other pending links keep theirs. */
+    takeUpdatesOptIn(a, t) {
+        const h = hash(t); const left = (a.updatesOptIn ?? []).filter((x) => x !== h); const yes = left.length < (a.updatesOptIn ?? []).length;
+        if (left.length) a.updatesOptIn = left; else delete a.updatesOptIn; return yes;
+    }
     // Tokens are written straight to the database (no save() needed).
     issue(accountId, kind) { const t = token(); this.sql.prepare('INSERT INTO tokens VALUES (?, ?, ?, ?)').run(hash(t), accountId, kind, this.now() + TOKEN_TTL_MS[kind]); this.prune(); return t; }
     prune() { this.sql.prepare('DELETE FROM tokens WHERE exp < ?').run(this.now()); }
