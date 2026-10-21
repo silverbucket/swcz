@@ -13,7 +13,8 @@ export async function runWatchlist(items, { name, statePath, outDir, isirEnabled
     const prev = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, 'utf8')) : { facts: {} };
     const firstRun = Object.keys(prev.facts).length === 0;
     const res = await check(items.map((i) => ({ ...i, dic: prev.facts[normaliseIco(i.ico)]?.dic })), { isirEnabled, coi, skip, log });
-    const nextFacts = { ...prev.facts };
+    // Only suppliers still on the list: register data of a removed supplier is deleted with it (privacy policy).
+    const nextFacts = Object.fromEntries(Object.entries(prev.facts).filter(([k]) => items.some((i) => normaliseIco(i.ico) === k)));
     const reportItems = res.rows.map((r) => {
         const f = facts(r);
         // Merge so that a field missing today (source outage) keeps yesterday's value.

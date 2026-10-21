@@ -180,3 +180,15 @@ test('sign-up: link scanners cannot confirm, too many sign-ups per IP are refuse
     const later = new Accounts(path.join(dataDir, 'accounts.json'), { now: () => Date.now() + 8 * 864e5 });
     assert.equal(later.purgeUnconfirmed(), 11); assert.equal(new Accounts(path.join(dataDir, 'accounts.json')).all().length, 0);
 });
+
+test('daily run: register data of a supplier removed from the list is deleted from the stored snapshot', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swrun-'));
+    const acc = new Accounts(path.join(dataDir, 'accounts.json'));
+    const { account, confirmToken } = acc.signup('g@x.cz', ['27082440', '45274649'], { consentText: 'x' }); acc.confirm(confirmToken); acc.save();
+    const check = async (items) => ({ errors: {}, rows: items.map((i) => ({ ico: i.ico, sourceErrors: [], ares: { found: true, name: 'Jan Novák', address: 'Praha' }, isir: { cases: [] } })) });
+    await runAll({ dataDir, mailer: { send: async () => {} }, check, log: () => {} });
+    const a = new Accounts(path.join(dataDir, 'accounts.json')); a.setIcos(a.get(account.id), ['27082440']); a.save();
+    await runAll({ dataDir, mailer: { send: async () => {} }, check, log: () => {} });
+    const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'state', `${account.id}.json`), 'utf8'));
+    assert.deepEqual(Object.keys(st.facts), ['27082440']); assert.deepEqual(Object.keys(st.latest), ['27082440']);
+});
