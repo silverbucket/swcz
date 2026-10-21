@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Daily job: data-source self-check, then check every confirmed, subscribed account (plan limit applied across
 // all its lists), email only when something changed, record history, send last month's PDF report on the 1st.
+import fs from 'node:fs';
 import path from 'node:path';
 import { Accounts } from './accounts.js';
 import { createMailer } from './mailer.js';
@@ -28,7 +29,12 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
     // ČOI list: downloaded at most once per run, and only if some active account has a website.
     let coi; let coiLoaded = false;
     const getCoi = async () => { if (!coiLoaded) { coiLoaded = true; coi = skip.coi ? null : await loadCoi({ dataDir, log }).catch(() => null); } return coi; };
+    const stateDir = path.join(dataDir, 'state'); const stateFiles = fs.existsSync(stateDir) ? fs.readdirSync(stateDir) : [];
     for (const a of acc.all()) {
+        // Snapshots of lists that are now empty or were deleted go too (register data is kept only for listed suppliers).
+        // Lists paused by a smaller plan still hold their suppliers, so they keep theirs.
+        const live = new Set([...(a.icos?.length ? [`${a.id}.json`] : []), ...(a.clients ?? []).filter((c) => c.icos.length).map((c) => `${a.id}--${c.id}.json`)]);
+        for (const f of stateFiles) if ((f === `${a.id}.json` || f.startsWith(`${a.id}--`)) && !live.has(f)) fs.rmSync(path.join(stateDir, f), { force: true });
         if (!a.confirmed || a.unsubscribed || a.deleteAt) continue;
         for (const l of acc.lists(a)) {
             if (!l.icos.length) continue;

@@ -175,9 +175,9 @@ ${reportsHtml(a, t, c.id)}
             return send(200, page('Check your email', `<h1>Check your email / Zkontrolujte e-mail</h1><p>We sent a confirmation link to ${esc(email)}.</p>${capped}${invalid.length ? `<p>Ignored invalid IČO: ${esc(invalid.join(', '))}</p>` : ''}`));
         }
 
-        if (P === '/confirm') { // GET shows a button: mail link scanners must not use up the single-use link
+        if (P === '/confirm') { // only POST confirms: mail link scanners (GET, HEAD) must not use up the single-use link
             const t = url.searchParams.get('t') || form().t;
-            if (req.method === 'GET') return send(200, page('Confirm your email', `<h1>Confirm your email / Potvrďte e-mail</h1><form method="post" action="/confirm">${hidden(t)}<button>Confirm and start daily checks / Potvrdit</button></form>`));
+            if (req.method !== 'POST') return send(200, page('Confirm your email', `<h1>Confirm your email / Potvrďte e-mail</h1><form method="post" action="/confirm">${hidden(t)}<button>Confirm and start daily checks / Potvrdit</button></form>`));
             const acc = new Accounts(accFile, { now }); const a = acc.confirm(t);
             if (!a) return send(400, page('Link expired', '<p>This link is invalid or expired. Sign up again on the <a href="/#signup">home page</a>.</p>'));
             const mt = acc.issue(a.id, 'manage'); acc.save();
@@ -208,7 +208,7 @@ ${reportsHtml(a, t, c.id)}
             const t = req.method === 'POST' ? f.t : url.searchParams.get('t');
             const acc = new Accounts(accFile, { now }); const a = t && acc.use(t, 'manage');
             if (!a) return send(400, page('Link expired', '<p>This link is invalid or expired.</p><form method="post" action="/manage-link"><input name="email" type="email" placeholder="email" required> <button>Send a new link</button></form>'));
-            if (req.method === 'GET') {
+            if (req.method !== 'POST') { // GET and HEAD only read; anything else falling through would save an empty list
                 const rep = url.searchParams.get('report'); const cid = url.searchParams.get('client');
                 if (cid && !acc.client(a, cid)) return send(404, page('Not found', '<p>No such client.</p>'));
                 if (rep) {
@@ -258,9 +258,9 @@ ${reportsHtml(a, t, c.id)}
             return send(200, manageHtml(acc, a, t, note));
         }
 
-        if (P === '/unsubscribe') { // GET shows a button (link scanners must not unsubscribe), POST does it (also RFC 8058 one-click)
+        if (P === '/unsubscribe') { // GET/HEAD show a button (link scanners must not unsubscribe), POST does it (also RFC 8058 one-click)
             const t = url.searchParams.get('t') || form().t;
-            if (req.method === 'GET') return send(200, page('Unsubscribe', `<form method="post" action="/unsubscribe?t=${esc(t)}"><p>Stop all Supplier Watch emails? / Zastavit všechny e-maily?</p><button>Unsubscribe / Odhlásit</button></form>`));
+            if (req.method !== 'POST') return send(200, page('Unsubscribe', `<form method="post" action="/unsubscribe?t=${esc(t)}"><p>Stop all Supplier Watch emails? / Zastavit všechny e-maily?</p><button>Unsubscribe / Odhlásit</button></form>`));
             const acc = new Accounts(accFile, { now }); const a = acc.unsubscribe(t); if (a) acc.save();
             if (!a) return send(400, page('Unsubscribe', '<p>Unknown link.</p>'));
             if (a.unsubToken !== t) return send(200, page('Unsubscribe', '<p>You\'re unsubscribed and won\'t get any more emails from this list. / Odhlášení proběhlo, další e-maily už nedostanete.</p>')); // a client's extra recipient

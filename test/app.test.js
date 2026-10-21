@@ -238,3 +238,46 @@ test('unsubscribing schedules deletion (also for accounts unsubscribed earlier);
     new Accounts(file).erase(ids['paid@x.cz'].id); web.get(ids['paid@x.cz'].id).plan = 'free'; web.save();
     assert.equal(new Accounts(file).get(ids['paid@x.cz'].id), null);
 });
+
+test('review fixes: deletion uses current rows; HEAD never confirms, unsubscribes or saves', async () => {
+    const { dataDir, srv } = setup(); const url = await listen(srv);
+    const file = path.join(dataDir, 'accounts.json');
+    const acc = new Accounts(file); const ids = {};
+    for (const e of ['keep@x.cz', 'resub@x.cz', 'head@x.cz']) { const { account, confirmToken } = acc.signup(e, ['27082440'], { consentText: 'x' }); acc.confirm(confirmToken); ids[e] = account; }
+    acc.scheduleDeletion(ids['keep@x.cz']); ids['resub@x.cz'].unsubscribed = true;
+    const t = acc.issue(ids['head@x.cz'].id, 'manage'); acc.save();
+    const run = new Accounts(file, { now: () => Date.now() + 31 * 864e5 }); // the daily run's copy, loaded early
+    const web = new Accounts(file); web.keep(web.get(ids['keep@x.cz'].id)); web.keep(web.get(ids['resub@x.cz'].id)); web.save();
+    assert.deepEqual(run.purgeDeleted(), { deleted: [], waiting: [] });
+    const now = new Accounts(file);
+    assert.ok(now.get(ids['keep@x.cz'].id)); assert.equal(now.get(ids['resub@x.cz'].id).deleteAt, undefined, 'resubscribed meanwhile: not re-scheduled');
+    try {
+        const n = new Accounts(file); const { confirmToken } = n.signup('new@x.cz', ['27082440'], { consentText: 'x' }); n.save();
+        await fetch(`${url}/confirm?t=${confirmToken}`, { method: 'HEAD' });
+        await fetch(`${url}/unsubscribe?t=${ids['head@x.cz'].unsubToken}`, { method: 'HEAD' });
+        await fetch(`${url}/manage?t=${t}`, { method: 'HEAD' });
+        const after = new Accounts(file);
+        assert.equal(after.byEmail('new@x.cz').confirmed, false); assert.equal(after.get(ids['head@x.cz'].id).unsubscribed, false);
+        assert.deepEqual(after.get(ids['head@x.cz'].id).icos, ['27082440'], 'HEAD /manage must not save an empty list');
+        assert.equal((await post(`${url}/confirm`, { t: confirmToken })).status, 200, 'token still usable');
+    } finally { srv.close(); }
+});
+
+test('review fixes: emptied list loses its snapshot; API sees today\'s result even if the alert email failed; warning after a partial first check', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swrun-'));
+    const file = path.join(dataDir, 'accounts.json');
+    const acc = new Accounts(file); const { account, confirmToken } = acc.signup('r@x.cz', ['27082440'], { consentText: 'x' }); acc.confirm(confirmToken); acc.save();
+    const statePath = path.join(dataDir, 'state', `${account.id}.json`);
+    let vat = null; // null = VAT register down
+    const check = async (items) => ({ errors: {}, rows: items.map((i) => ({ ico: i.ico, sourceErrors: vat ? [] : ['dph: down'], ares: { found: true, name: 'X' }, ...(vat ? { vat } : {}), isir: { cases: [] } })) });
+    let down = false; const sent = []; const mailer = { send: async (m) => { if (down) throw new Error('smtp'); sent.push(m); } };
+    await runAll({ dataDir, mailer, check, log: () => {} }); assert.equal(sent.length, 0, 'partial first check: nothing to report');
+    vat = { subjectType: 'PLATCE_DPH', unreliable: 'ANO', accounts: [] }; down = true;
+    await runAll({ dataDir, mailer, check, log: () => {} });
+    assert.equal(JSON.parse(fs.readFileSync(statePath, 'utf8')).latest['27082440'].checks.vat.status, 'alert', 'API shows today\'s result');
+    down = false;
+    await runAll({ dataDir, mailer, check, log: () => {} }); assert.equal(sent.length, 1); assert.match(sent[0].subject, /warnings found/);
+    await runAll({ dataDir, mailer, check, log: () => {} }); assert.equal(sent.length, 1, 'once');
+    const a = new Accounts(file); a.setIcos(a.get(account.id), []); a.save();
+    await runAll({ dataDir, mailer, check, log: () => {} }); assert.ok(!fs.existsSync(statePath), 'emptied list: snapshot deleted');
+});

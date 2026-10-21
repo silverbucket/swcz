@@ -31,6 +31,15 @@ export function cachedSources(dataDir, { sources = REGISTER_SOURCES, now = () =>
         .run(source, key, JSON.stringify(value ?? null), now());
     // Register did not answer: an older answer if allowed and present, else the error.
     const fallback = (source, key, e) => { const r = staleFallback && row(source, key); if (r) return r.value; throw e; };
+    // The registers a check of this IČO asks, as [source, key], following checkWatchlist: VAT by the DIČ from ARES
+    // (else CZ + IČO), the public register only for subjects ARES flags as in it. Unknown until ARES has answered.
+    const used = (ico, isir) => {
+        const ares = row('ares', ico); if (!ares) return [['ares', ico]];
+        const out = [['ares', ico], ['dph', (ares.value?.dic ?? `CZ${ico}`).replace(/^CZ/, '')]];
+        if (ares.value?.found && ares.value.aresPublicRegisterFlag === 'AKTIVNI') out.push(['vr', ico]);
+        if (isir) out.push(['isir', ico]);
+        return out;
+    };
     const inFlight = new Map(); // concurrent callers of the same lookup share one request
     const one = (source) => async (key) => {
         const hit = fresh(source, key); if (hit) return hit.value;
@@ -54,15 +63,15 @@ export function cachedSources(dataDir, { sources = REGISTER_SOURCES, now = () =>
             return { generated, subjects };
         },
         /**
-         * When the ARES / ISIR answers for this IČO were fetched: { at: oldest fetch (ms), stale: true if any is
-         * not fresh, i.e. an older answer was used because the register did not answer }, or null.
+         * When the stored answers a check of this IČO uses were fetched: { at: oldest fetch (ms), stale: true if any
+         * is not fresh (an older answer was used because a register did not answer) }, or null.
          */
         asOf(ico, { isir = true } = {}) {
-            const ts = (isir ? ['ares', 'isir'] : ['ares']).map((s) => row(s, ico)?.at).filter((t) => t != null);
-            if (!ts.length) return null;
-            const at = Math.min(...ts); return { at, stale: at < freshFrom() };
+            const rows = used(ico, isir).map(([s, k]) => row(s, k)).filter(Boolean);
+            if (!rows.length) return null;
+            const at = Math.min(...rows.map((r) => r.at)); return { at, stale: at < freshFrom() };
         },
-        /** True if a check of this IČO needs no ARES or ISIR request (used to skip the free-check rate limit). */
-        cached: (ico, { isir = true } = {}) => Boolean(fresh('ares', ico) && (!isir || fresh('isir', ico))),
+        /** True if every register a check of this IČO asks has a fresh answer (used to skip the free-check rate limit). */
+        cached: (ico, { isir = true } = {}) => { const u = used(ico, isir); return u.length > 0 && u.every(([s, k]) => fresh(s, k)); },
     };
 }

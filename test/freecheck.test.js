@@ -126,6 +126,19 @@ test('free check: when a register is down, the last answer is shown with its dat
     assert.equal(rec.checks.ares.status, 'failed', 'monitoring records "not checked", not the old answer'); assert.equal(rec.checks.vat.status, 'failed'); assert.equal(st.checked, 1);
 });
 
+test('review fixes: an old VAT answer is flagged even when ARES and ISIR are fresh; a check needing VAT is not exempt from the limit', async () => {
+    let t = Date.parse('2026-10-21T08:00:00Z'); const reg = registers(); let vatDown = false;
+    const sources = { ...reg, dph: async (d) => { if (vatDown) throw new Error('down'); return reg.dph(d); } };
+    const fc = createFreeCheck({ env: {}, dataDir: tmpDir(), sources, loadCoi: async () => null, now: () => t, limiter: new RateLimiter({ perIp: 2, global: 100 }) });
+    await withServer(fc, async (url) => {
+        await post(url, { ico: '27082440' }); // all fresh, limit 1 of 2
+        t += 37 * 3600e3; vatDown = true;
+        const h = await (await post(url, { ico: '27082440' })).text(); // limit 2 of 2: ARES/ISIR refreshed, VAT from the old answer
+        assert.match(h, /last answer we have, from 2026-10-21/); assert.match(h, /UNRELIABLE VAT PAYER/);
+        assert.equal((await post(url, { ico: '27082440' })).status, 429, 'VAT still not fresh, so this check would hit the register: limited');
+    });
+});
+
 test('static SEO files: guides, sitemap, robots, internal links', async () => {
     await withServer(createFreeCheck({ env: {}, dataDir: '/tmp', check: async () => ({ rows: [] }) }), async (url) => {
         const sm = await (await fetch(`${url}/sitemap.xml`)).text();

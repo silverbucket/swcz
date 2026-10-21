@@ -191,16 +191,24 @@ export class Accounts {
         deleteAccountFiles(path.dirname(this.file), id);
         delete this.db.accounts[id]; this.snap.delete(id);
     }
-    /** Daily: schedule unsubscribed accounts that have no date yet, delete the ones that are due. */
+    /**
+     * Daily: schedule unsubscribed accounts that have no date yet, delete the ones that are due. Decides on the rows
+     * as they are now, in one transaction (not on this instance's copies, which may be hours old in the daily run),
+     * so a "keep", a resubscribe or a new subscription made meanwhile always wins.
+     */
     purgeDeleted() {
-        const out = { deleted: [], waiting: [] };
-        for (const a of this.all()) {
-            if (a.unsubscribed && !a.deleteAt) this.scheduleDeletion(a);
-            if (!a.deleteAt || a.deleteAt > new Date(this.now()).toISOString()) continue;
-            if (this.liveSubscription(a)) { out.waiting.push(a.id); continue; } // deleted once Stripe ends the plan
-            this.erase(a.id); out.deleted.push(a.id);
-        }
-        this.save();
+        const out = { deleted: [], waiting: [] }; const nowIso = new Date(this.now()).toISOString();
+        tx(this.sql, () => {
+            for (const r of this.sql.prepare('SELECT id, data FROM accounts').all()) {
+                const a = JSON.parse(r.data);
+                if (a.unsubscribed && !a.deleteAt) { this.scheduleDeletion(a); this.sql.prepare('UPDATE accounts SET data = ? WHERE id = ?').run(JSON.stringify(a), a.id); }
+                if (!a.deleteAt || a.deleteAt > nowIso) continue;
+                if (this.liveSubscription(a)) { out.waiting.push(a.id); continue; } // deleted once Stripe ends the plan
+                this.sql.prepare('DELETE FROM accounts WHERE id = ?').run(a.id); this.sql.prepare('DELETE FROM tokens WHERE account_id = ?').run(a.id);
+                out.deleted.push(a.id);
+            }
+        });
+        for (const id of out.deleted) { deleteAccountFiles(path.dirname(this.file), id); delete this.db.accounts[id]; this.snap.delete(id); }
         return out;
     }
     setIcos(a, icos, websites = {}) { return this.setIcosMain(a, icos, websites); }

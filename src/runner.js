@@ -1,20 +1,21 @@
 // Run one watchlist: check, diff against stored state, write reports. Shared by cli.js and run.js.
 import fs from 'node:fs';
 import path from 'node:path';
-import { checkWatchlist, facts, currentAlerts, changes } from './check.js';
+import { checkWatchlist, facts, currentAlerts, changes, ALERT_FACT } from './check.js';
 import { buildReport } from './report.js';
 import { recordFor, appendHistory } from './history.js';
 import { normaliseIco } from './ico.js';
 
 export async function runWatchlist(items, { name, statePath, outDir, isirEnabled = true, coi, skip = {}, log = () => {}, check = checkWatchlist, history, now = () => Date.now(), deferState = false }) {
     // history: { dataDir, accountId, list, client } -> append one record per supplier to the check history.
-    // deferState: don't store today's facts; the caller calls saveState() once the alert email is out, so a mail
-    // failure re-detects the change tomorrow instead of losing it.
+    // deferState: today's results (latest, for the API) are stored at once, but the comparison baseline (facts) only
+    // when the caller calls saveState() once the alert email is out, so a mail failure re-detects the change tomorrow.
     const prev = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, 'utf8')) : { facts: {} };
     const firstRun = Object.keys(prev.facts).length === 0;
     const res = await check(items.map((i) => ({ ...i, dic: prev.facts[normaliseIco(i.ico)]?.dic })), { isirEnabled, coi, skip, log });
     // Only suppliers still on the list: register data of a removed supplier is deleted with it (privacy policy).
-    const nextFacts = Object.fromEntries(Object.entries(prev.facts).filter(([k]) => items.some((i) => normaliseIco(i.ico) === k)));
+    const kept = Object.fromEntries(Object.entries(prev.facts).filter(([k]) => items.some((i) => normaliseIco(i.ico) === k)));
+    const nextFacts = { ...kept };
     const reportItems = res.rows.map((r) => {
         const f = facts(r);
         // Merge so that a field missing today (source outage) keeps yesterday's value.
@@ -35,11 +36,12 @@ export async function runWatchlist(items, { name, statePath, outDir, isirEnabled
     const latest = { ...(prev.latest ?? {}) };
     for (const r of records) latest[r.ico] = r;
     for (const k of Object.keys(latest)) if (!items.some((i) => String(i.ico).padStart(8, '0') === k)) delete latest[k];
-    const saveState = () => {
+    const write = (baseline) => {
         fs.mkdirSync(path.dirname(statePath), { recursive: true });
-        fs.writeFileSync(`${statePath}.tmp`, JSON.stringify({ updatedAt: at, facts: nextFacts, latest }, null, 1)); fs.renameSync(`${statePath}.tmp`, statePath);
+        fs.writeFileSync(`${statePath}.tmp`, JSON.stringify({ updatedAt: at, facts: baseline, latest }, null, 1)); fs.renameSync(`${statePath}.tmp`, statePath);
     };
-    if (!deferState) saveState();
+    const saveState = () => write(nextFacts);
+    write(deferState ? kept : nextFacts);
     if (history) appendHistory(history.dataDir, history.accountId, records, new Date(now()));
     const result = { watchlist: name, firstRun, errors: res.errors, items: reportItems };
     const text = buildReport(result, { watchlist: name, firstRun, coiUsed: !!coi && items.some((i) => i.website) });
@@ -50,8 +52,8 @@ export async function runWatchlist(items, { name, statePath, outDir, isirEnabled
         fs.writeFileSync(path.join(outDir, `${name}-${stamp}.txt`), text);
     }
     const changed = reportItems.some((i) => i.changes.length);
-    // A supplier new to the list that already has a warning (e.g. unreliable payer) is reported once; it has no "change".
-    // shortcut: a supplier whose first check hit an outage gets a baseline without alerts, so it is not reported later.
-    const newAlerts = reportItems.some((i) => !prev.facts[i.ico] && i.alerts.length);
+    // A warning that holds since before we had a baseline for it (e.g. a new supplier that is already an unreliable
+    // payer) is reported once; it is not a "change".
+    const newAlerts = reportItems.some((i) => i.alerts.some((al) => ALERT_FACT[al] && !(ALERT_FACT[al] in (prev.facts[i.ico] ?? {}))));
     return { result, text, firstRun, changed, newAlerts, records, saveState };
 }

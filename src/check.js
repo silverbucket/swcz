@@ -116,6 +116,13 @@ export function currentAlerts(r) {
     return a;
 }
 
+// The fact each alert rests on. An alert counts as new (emailed once) when the stored baseline lacks that fact: the
+// supplier is new to the list, or that register did not answer when the supplier was first checked.
+export const ALERT_FACT = {
+    NOT_IN_ARES: 'found', DISSOLVED: 'dissolved', UNRELIABLE_VAT_PAYER: 'unreliable', EXPECTED_ACCOUNT_NOT_PUBLISHED: 'expectedAccountPublished',
+    INSOLVENCY_PROCEEDING: 'isirCases', INSOLVENCY_FLAG_IN_ARES: 'aresInsolvencyFlag', IN_LIQUIDATION: 'name', COI_RISKY_WEBSITE: 'coiListed',
+};
+
 const LABELS = {
     name: 'NAME_CHANGED', address: 'ADDRESS_CHANGED', dissolved: 'DISSOLVED_CHANGED', aresInsolvencyFlag: 'ARES_INSOLVENCY_FLAG_CHANGED', aresVatFlag: 'ARES_VAT_FLAG_CHANGED',
     vatSubjectType: 'VAT_REGISTRATION_CHANGED', unreliable: 'UNRELIABLE_STATUS_CHANGED', expectedAccountPublished: 'EXPECTED_ACCOUNT_STATUS_CHANGED', found: 'ARES_PRESENCE_CHANGED', statutoryHash: 'STATUTORY_BODY_CHANGED', ownersHash: 'OWNERS_CHANGED',
