@@ -19,7 +19,7 @@ export class SlidingLimiter {
         const h = (this.hits.get(key) ?? []).filter((x) => x > cut);
         if (h.length >= this.limit) { this.hits.set(key, h); return { ok: false, remaining: 0, retryAfter: Math.max(1, Math.ceil((h[0] + this.windowMs - t) / 1000)) }; }
         h.push(t); this.hits.set(key, h);
-        if (this.hits.size > 5000) for (const [k, v] of this.hits) if (!v.some((x) => x > cut)) this.hits.delete(k);
+        for (const [k, v] of this.hits) if (!v.some((x) => x > cut)) this.hits.delete(k); // forget IPs after the window (privacy policy)
         return { ok: true, remaining: this.limit - h.length };
     }
 }
