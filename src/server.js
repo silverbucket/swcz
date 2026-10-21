@@ -2,7 +2,7 @@
 // Supplier Watch web app. Listens on 127.0.0.1 behind the web server and serves:
 //   static site, /terms.html, /privacy.html, POST /signup, GET+POST /confirm, POST /manage-link,
 //   GET+POST /check (free one-off check), GET+POST /manage, GET+POST /unsubscribe, POST /stripe/webhook, GET /healthz
-// With MONITORING_ENABLED=false (site.js) only the static site, the free check, the updates list (POST /signup with
+// With SIGNUPS_ENABLED=false (site.js) only the static site, the free check, the updates list (POST /signup with
 // updates=1, /confirm?u=, /unsubscribe?u=), account unsubscribes and /healthz stay; the rest answers "paused".
 import crypto from 'node:crypto';
 import http from 'node:http';

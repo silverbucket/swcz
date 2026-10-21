@@ -10,7 +10,7 @@ import { renderResult } from '../src/freecheck.js';
 import { runAll } from '../src/run.js';
 import { tmp, listen, post, mailbox, makeAccount, accounts } from './fixtures/helpers.js';
 
-const PAUSED = { MONITORING_ENABLED: 'false' };
+const PAUSED = { SIGNUPS_ENABLED: 'false' };
 const site = (f) => fs.readFileSync(new URL(`../site/${f}`, import.meta.url), 'utf8');
 const updates = (dataDir) => new Updates(path.join(dataDir, 'accounts.json'));
 // Free check stub: the real one needs the registers (see freecheck.test.js).
@@ -22,9 +22,9 @@ function setup(env = {}, opts = {}) {
 }
 const linkIn = (m, p, k) => m.text.match(new RegExp(`https://sw\\.test${p}\\?${k}=([\\w-]+)`))[1];
 
-test('the switch: on unless MONITORING_ENABLED is false/0/no/off', () => {
-    assert.equal(monitoringEnabled({}), true); assert.equal(monitoringEnabled({ MONITORING_ENABLED: 'true' }), true);
-    for (const v of ['false', 'FALSE', '0', 'no', 'off', ' false ']) assert.equal(monitoringEnabled({ MONITORING_ENABLED: v }), false, v);
+test('the switch: on unless SIGNUPS_ENABLED is false/0/no/off', () => {
+    assert.equal(monitoringEnabled({}), true); assert.equal(monitoringEnabled({ SIGNUPS_ENABLED: 'true' }), true);
+    for (const v of ['false', 'FALSE', '0', 'no', 'off', ' false ']) assert.equal(monitoringEnabled({ SIGNUPS_ENABLED: v }), false, v);
 });
 
 test('pages: the paused variant drops sign-up, pricing, plans and API links; the monitoring variant drops the updates form', () => {

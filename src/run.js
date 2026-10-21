@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Daily job: data-source self-check, then check every confirmed, subscribed account (plan limit applied across
 // all its lists), email only when something changed, record history, send last month's PDF report on the 1st.
-// With MONITORING_ENABLED=false only the self-check (its alert still reaches OPS_EMAIL) and the housekeeping run.
+// With SIGNUPS_ENABLED=false only the self-check (its alert still reaches OPS_EMAIL) and the housekeeping run.
 import fs from 'node:fs';
 import path from 'node:path';
 import { Accounts } from './accounts.js';

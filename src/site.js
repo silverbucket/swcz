@@ -1,4 +1,4 @@
-// One switch for the whole service: MONITORING_ENABLED (default on). Set it to "false" (or 0/no/off) to pause ongoing
+// One switch for the whole service: SIGNUPS_ENABLED (default on). Set it to "false" (or 0/no/off) to pause ongoing
 // monitoring: sign-up, pricing, manage pages and the API go, the daily run only does its source self-check and
 // housekeeping, and the free one-off check and the updates list stay.
 // Pages mark the alternatives with <!--if monitoring-->...<!--end--> and <!--if paused-->...<!--end--> (no nesting).
@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const monitoringEnabled = (env = process.env) => !/^(0|false|no|off)$/i.test(String(env.MONITORING_ENABLED ?? '').trim());
+export const monitoringEnabled = (env = process.env) => !/^(0|false|no|off)$/i.test(String(env.SIGNUPS_ENABLED ?? '').trim());
 
 const BLOCK = /<!--if (monitoring|paused)-->([\s\S]*?)<!--end-->/g;
 /** The page as it should be served for the current setting. */
