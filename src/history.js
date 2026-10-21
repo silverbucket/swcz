@@ -60,6 +60,15 @@ export function historyMonths(dataDir, accountId) {
     const d = dirFor(dataDir, accountId); if (!fs.existsSync(d)) return [];
     return fs.readdirSync(d).map((f) => f.match(/^(\d{4}-\d{2})\.jsonl$/)?.[1]).filter(Boolean).sort().reverse();
 }
+/** Remove every file of an account: list snapshots, check history, monthly PDFs, daily report files. */
+export function deleteAccountFiles(dataDir, accountId) {
+    const id = String(accountId).replace(/[^\w-]/g, ''); if (!id) return;
+    for (const sub of ['history', 'monthly']) fs.rmSync(path.join(dataDir, sub, id), { recursive: true, force: true });
+    for (const sub of ['state', 'reports']) { // <id>.json, <id>--<client>.json, <id>-<date>.txt ...
+        const d = path.join(dataDir, sub); if (!fs.existsSync(d)) continue;
+        for (const f of fs.readdirSync(d)) if (f.startsWith(`${id}.`) || f.startsWith(`${id}-`)) fs.rmSync(path.join(d, f), { force: true });
+    }
+}
 /** Delete history (and stored PDF reports) older than `months` full months, and daily report files older than REPORT_DAYS. Returns files removed. */
 export function pruneHistory(dataDir, months = DEFAULT_HISTORY_MONTHS, now = new Date()) {
     let cut = pragueMonth(now); for (let i = 0; i < months; i++) cut = prevMonth(cut);

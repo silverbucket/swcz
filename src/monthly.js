@@ -96,7 +96,7 @@ export function getReport(dataDir, account, month, { clientId = null, now = new 
 export async function sendMonthlyReports({ dataDir, acc, mailer, baseUrl, now = new Date(), log = () => {} }) {
     const month = prevMonth(pragueMonth(now)); let sent = 0;
     for (const a of acc.all()) {
-        if (!a.confirmed || a.unsubscribed || a.reportsSent?.includes(month)) continue;
+        if (!a.confirmed || a.unsubscribed || a.deleteAt || a.reportsSent?.includes(month)) continue;
         const recs = monthRecords(dataDir, a, month);
         if (!recs.length) continue;
         try {

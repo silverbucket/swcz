@@ -19,7 +19,7 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
     const shared = cachedSources(dataDir, { sources, now });
     const doCheck = check ?? ((items, o) => checkWatchlist(items, { ...o, sources: shared }));
     const baseUrl = (env.BASE_URL || 'https://supplierwatch.cz').replace(/\/$/, '');
-    const acc = new Accounts(path.join(dataDir, 'accounts.json'));
+    const acc = new Accounts(path.join(dataDir, 'accounts.json'), { now });
     const summary = { checked: 0, emailed: 0, failed: 0, sourcesFailed: [], reports: 0 };
     let skip = {};
     if (canary && env.CANARY_DISABLED !== '1') { // tests that inject `check` run without the network canary unless they pass one
@@ -29,7 +29,7 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
     let coi; let coiLoaded = false;
     const getCoi = async () => { if (!coiLoaded) { coiLoaded = true; coi = skip.coi ? null : await loadCoi({ dataDir, log }).catch(() => null); } return coi; };
     for (const a of acc.all()) {
-        if (!a.confirmed || a.unsubscribed) continue;
+        if (!a.confirmed || a.unsubscribed || a.deleteAt) continue;
         for (const l of acc.lists(a)) {
             if (!l.icos.length) continue;
             const items = l.icos.map((ico) => ({ ico, label: null, expectedAccount: null, website: l.websites?.[ico] ?? null }));
@@ -52,6 +52,11 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
     try { summary.reports = await sendMonthlyReports({ dataDir, acc, mailer, baseUrl, now: new Date(now()), log }); } catch (e) { log(`monthly reports: ${e.message}`); }
     acc.save();
     try { const n = acc.purgeUnconfirmed(); if (n) log(`purged ${n} unconfirmed sign-ups`); } catch (e) { log(`purge: ${e.message}`); }
+    try {
+        const d = acc.purgeDeleted(); summary.deleted = d.deleted.length;
+        if (d.deleted.length) log(`deleted accounts: ${d.deleted.join(', ')}`);
+        if (d.waiting.length) log(`deletion due but a paid subscription is still running: ${d.waiting.join(', ')}`);
+    } catch (e) { log(`account deletion: ${e.message}`); }
     try { const n = pruneHistory(dataDir, Number(env.HISTORY_MONTHS || DEFAULT_HISTORY_MONTHS), new Date(now())); if (n) log(`pruned ${n} old history/report files`); } catch (e) { log(`prune: ${e.message}`); }
     return summary;
 }

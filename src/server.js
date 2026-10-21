@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifySignature } from './billing.js';
-import { Accounts, PLANS, parseSupplierForm, validEmail, normEmail, suppliersText } from './accounts.js';
+import { Accounts, PLANS, DELETE_GRACE_DAYS, parseSupplierForm, validEmail, normEmail, suppliersText } from './accounts.js';
 import { createMailer } from './mailer.js';
 import { createFreeCheck, checkPageHtml, RateLimiter, clientIp } from './freecheck.js';
 import { createApi } from './api.js';
@@ -95,10 +95,18 @@ ${keys.length ? `<table class="t"><tr><th>Key</th><th>Label</th><th>Created</th>
 ${cl.length ? `<table class="t"><tr><th>Client</th><th>Suppliers</th><th>Extra recipients</th></tr>${cl.map((c) => `<tr><td><a href="${esc(mlink(t, { client: c.id }))}">${esc(c.name)}</a></td><td>${c.icos.length}</td><td>${(c.recipients ?? []).map((r) => esc(r.email) + (r.unsubscribed ? ' (unsubscribed)' : '')).join(', ') || '-'}</td></tr>`).join('')}</table>` : '<p class="muted">No clients yet.</p>'}
 <form method="post" action="/manage">${hidden(t, { action: 'add_client' })}<input name="name" maxlength="120" required placeholder="client name, e.g. Novák s.r.o."> <button>Add client</button></form>`;
     };
+    const day = (iso) => esc(String(iso).slice(0, 10));
+    const pendingHtml = (a, t) => (a.deleteAt ? `<div class="box"><p><strong>Your account is scheduled for deletion on ${day(a.deleteAt)}.</strong> Checks and emails are stopped until then. / Účet bude smazán ${day(a.deleteAt)}, kontroly a e-maily jsou zastaveny.</p><form method="post" action="/manage">${hidden(t, { action: 'keep_account' })}<button>Keep my account / Ponechat účet</button></form></div>` : '');
+    const deletionHtml = (acc, a, t) => {
+        if (a.deleteAt) return '';
+        if (acc.liveSubscription(a) && !a.cancelAt) return '<h2>Delete account / Smazat účet</h2><p>Cancel your paid plan first with the Manage billing button, then you can delete your account here. / Nejprve zrušte placený tarif.</p>';
+        return `<h2>Delete account / Smazat účet</h2><p>This stops all checks and emails now, and ${DELETE_GRACE_DAYS} days later deletes your account, supplier and client lists, check history and monthly reports${a.cancelAt ? ` (or after your paid plan ends on ${day(new Date(a.cancelAt * 1000).toISOString())}, if later)` : ''}. Until then you can keep your account from this page. Download any monthly reports you need first. Invoices stay with our payment provider as the law requires.<br>Zastaví kontroly a e-maily a po ${DELETE_GRACE_DAYS} dnech smaže účet a všechna data. Do té doby můžete účet ponechat.</p>
+<form method="post" action="/manage">${hidden(t, { action: 'delete_account' })}<label><input type="checkbox" name="sure" value="1" required> I want to delete my account / Chci smazat účet</label> <button>Delete my account / Smazat účet</button></form>`;
+    };
     const manageHtml = (acc, a, t, note = '', { newKey } = {}) => {
         const used = acc.total(a); const lim = acc.limit(a);
         const room = Math.max(a.icos.length, lim - acc.total(a, 'main'));
-        return page('Your suppliers', `<h1>Your suppliers / Vaši dodavatelé</h1>${note}
+        return page('Your suppliers', `<h1>Your suppliers / Vaši dodavatelé</h1>${note}${pendingHtml(a, t)}
 <p>${esc(a.email)} · plan <strong>${esc(PLAN_INFO[a.plan]?.name ?? a.plan)}</strong> · ${used} of ${lim.toLocaleString('en-US')} suppliers used${a.unsubscribed ? ' · <strong>alerts paused (unsubscribed)</strong>' : ''}</p>
 ${acc.hasClients(a) ? '<h2>Your own suppliers</h2>' : ''}<form method="post" action="/manage">${hidden(t)}
 ${supplierFields(a.icos, a.websites, room)}
@@ -108,7 +116,7 @@ ${clientsHtml(acc, a, t)}
 ${reportsHtml(a, t)}
 ${keysHtml(a, t, newKey)}
 ${upgradeHtml(a, t)}
-${billingBtn(a, t)}<p class="muted">You can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.<br>Tarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.</p>`);
+${billingBtn(a, t)}${deletionHtml(acc, a, t)}<p class="muted">You can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.<br>Tarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.</p>`);
     };
     const clientHtml = (acc, a, c, t, note = '') => {
         const room = Math.max(c.icos.length, acc.limit(a) - acc.total(a, c.id));
@@ -217,6 +225,17 @@ ${reportsHtml(a, t, c.id)}
                 const r = acc.createApiKey(a, f.label); acc.save();
                 return send(r.error ? 400 : 200, manageHtml(acc, a, t, r.error ? `<p class="sw-err">${esc(r.error)}</p>` : '<p><strong>API key created.</strong></p>', { newKey: r.key }));
             }
+            if (action === 'delete_account') {
+                if (f.sure !== '1') return send(400, manageHtml(acc, a, t, '<p class="sw-err">Tick the box to confirm. / Potvrďte zaškrtnutím.</p>'));
+                if (acc.liveSubscription(a) && !a.cancelAt) return send(400, manageHtml(acc, a, t, '<p class="sw-err">Cancel your paid plan first. / Nejprve zrušte placený tarif.</p>'));
+                const when = acc.scheduleDeletion(a).slice(0, 10); acc.save(); log(`deletion requested: ${a.id} on ${when}`);
+                try {
+                    await mailer.send({ to: a.email, unsubscribeUrl: unsubUrl(a), subject: 'Your Supplier Watch account will be deleted / Účet bude smazán',
+                        text: `Your Supplier Watch account (${a.email}) and all its data will be deleted on ${when}. Daily checks and emails have stopped.\nTo keep your account, request a link at ${baseUrl}/#manage and click "Keep my account".\n\nVáš účet Supplier Watch (${a.email}) a všechna jeho data budou smazány ${when}. Kontroly a e-maily jsou zastaveny.\nPokud chcete účet ponechat, vyžádejte si odkaz na ${baseUrl}/#manage a klikněte na „Ponechat účet“.` });
+                } catch (e) { log(`deletion mail failed for ${a.id}: ${e.message}`); }
+                return send(200, manageHtml(acc, a, t, '<p><strong>Deletion scheduled. We sent you a confirmation email. / Smazání naplánováno.</strong></p>'));
+            }
+            if (action === 'keep_account') { acc.keep(a); acc.save(); log(`deletion cancelled: ${a.id}`); return send(200, manageHtml(acc, a, t, '<p><strong>Your account is kept; daily checks and emails resume. / Účet ponechán.</strong></p>')); }
             if (action === 'revoke_key') { const ok = acc.revokeApiKey(a, f.key); acc.save(); return send(ok ? 200 : 400, manageHtml(acc, a, t, ok ? '<p><strong>API key revoked.</strong></p>' : '<p class="sw-err">Key not found.</p>')); }
             if (action === 'add_client') {
                 const r = acc.addClient(a, f.name); if (r.error) return send(400, manageHtml(acc, a, t, `<p class="sw-err">${esc(r.error)}</p>`));
@@ -233,7 +252,7 @@ ${reportsHtml(a, t, c.id)}
                 return send(200, clientHtml(acc, a, c, t, note));
             }
             const r = acc.setIcos(a, icos, websites);
-            if (f.resubscribe === '1') a.unsubscribed = false;
+            if (f.resubscribe === '1') acc.keep(a);
             acc.save();
             const note = `<p><strong>Saved ${r.kept} suppliers.</strong>${r.dropped ? ` ${r.dropped} over your plan limit were not saved; upgrade below.` : ''}${invalid.length ? ` Ignored invalid: ${esc(invalid.join(', '))}` : ''}</p>`;
             return send(200, manageHtml(acc, a, t, note));
@@ -243,7 +262,10 @@ ${reportsHtml(a, t, c.id)}
             const t = url.searchParams.get('t') || form().t;
             if (req.method === 'GET') return send(200, page('Unsubscribe', `<form method="post" action="/unsubscribe?t=${esc(t)}"><p>Stop all Supplier Watch emails? / Zastavit všechny e-maily?</p><button>Unsubscribe / Odhlásit</button></form>`));
             const acc = new Accounts(accFile, { now }); const a = acc.unsubscribe(t); if (a) acc.save();
-            return send(a ? 200 : 400, page('Unsubscribe', a ? '<p>You\'re unsubscribed and won\'t get any more emails. This doesn\'t cancel a paid plan. You can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.</p><p>Odhlášení proběhlo, další e-maily už nedostanete. Placený tarif tím zrušen není. Tarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.</p>' : '<p>Unknown link.</p>'));
+            if (!a) return send(400, page('Unsubscribe', '<p>Unknown link.</p>'));
+            if (a.unsubToken !== t) return send(200, page('Unsubscribe', '<p>You\'re unsubscribed and won\'t get any more emails from this list. / Odhlášení proběhlo, další e-maily už nedostanete.</p>')); // a client's extra recipient
+            const paid = acc.liveSubscription(a) ? '<p>You have a paid plan: unsubscribing does not cancel it. Cancel it with the Manage billing button on your manage page; your account is deleted after the plan ends. / Placený tarif tím zrušen není, zrušte ho tlačítkem Správa plateb.</p>' : '';
+            return send(200, page('Unsubscribe', `<p>You're unsubscribed and won't get any more emails. Your account and its data (supplier lists, check history, monthly reports) will be deleted on ${day(a.deleteAt)}. To keep your account, request a link on the <a href="/#manage">home page</a> and click "Keep my account".</p><p>Odhlášení proběhlo, další e-maily už nedostanete. Účet a jeho data budou smazány ${day(a.deleteAt)}. Pokud chcete účet ponechat, vyžádejte si odkaz na <a href="/#manage">úvodní stránce</a> a klikněte na „Ponechat účet“.</p>${paid}`));
         }
 
         if (req.method === 'GET' && (P === '/terms.html' || P === '/privacy.html')) {

@@ -192,3 +192,49 @@ test('daily run: register data of a supplier removed from the list is deleted fr
     const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'state', `${account.id}.json`), 'utf8'));
     assert.deepEqual(Object.keys(st.facts), ['27082440']); assert.deepEqual(Object.keys(st.latest), ['27082440']);
 });
+
+test('account deletion: requested on the manage page, 30-day grace, keep cancels it, then the daily run deletes everything', async () => {
+    const { dataDir, sent, srv } = setup(); const url = await listen(srv);
+    const file = path.join(dataDir, 'accounts.json');
+    const acc = new Accounts(file); const { account, confirmToken } = acc.signup('del@x.cz', ['27082440'], { consentText: 'x' }); acc.confirm(confirmToken);
+    const t = acc.issue(account.id, 'manage'); acc.save();
+    try {
+        assert.equal((await post(`${url}/manage`, { t, action: 'delete_account' })).status, 400, 'checkbox required');
+        let h = await (await post(`${url}/manage`, { t, action: 'delete_account', sure: '1' })).text();
+        assert.match(h, /scheduled for deletion on \d{4}-\d{2}-\d{2}/); assert.match(sent.at(-1).subject, /will be deleted/);
+        const due = new Accounts(file).get(account.id).deleteAt; assert.ok(Date.parse(due) - Date.now() > 29 * 864e5);
+        h = await (await post(`${url}/manage`, { t, action: 'keep_account' })).text(); assert.match(h, /Your account is kept/);
+        assert.equal(new Accounts(file).get(account.id).deleteAt, undefined);
+        await post(`${url}/manage`, { t, action: 'delete_account', sure: '1' });
+    } finally { srv.close(); }
+    const check = async () => assert.fail('no checks while deletion is pending');
+    await runAll({ dataDir, mailer: { send: async () => {} }, check, log: () => {} });
+    for (const [d, f] of [['state', `${account.id}.json`], ['state', `${account.id}--cl_1.json`], ['reports', `${account.id}-2026-10-01.txt`], [`history/${account.id}`, '2026-10.jsonl'], [`monthly/${account.id}`, '2026-09.pdf']]) {
+        fs.mkdirSync(path.join(dataDir, d), { recursive: true }); fs.writeFileSync(path.join(dataDir, d, f), 'x');
+    }
+    fs.writeFileSync(path.join(dataDir, 'state', 'acc_other.json'), 'x');
+    await runAll({ dataDir, mailer: { send: async () => {} }, check, log: () => {}, now: () => Date.now() + 31 * 864e5 });
+    assert.equal(new Accounts(file).get(account.id), null);
+    assert.deepEqual(fs.readdirSync(path.join(dataDir, 'state')), ['acc_other.json']); assert.deepEqual(fs.readdirSync(path.join(dataDir, 'reports')), []);
+    assert.ok(!fs.existsSync(path.join(dataDir, 'history', account.id))); assert.ok(!fs.existsSync(path.join(dataDir, 'monthly', account.id)));
+});
+
+test('unsubscribing schedules deletion (also for accounts unsubscribed earlier); a running paid plan is never deleted', async () => {
+    const { dataDir, srv } = setup(); const url = await listen(srv);
+    const file = path.join(dataDir, 'accounts.json');
+    const acc = new Accounts(file); const ids = {};
+    for (const e of ['u@x.cz', 'paid@x.cz', 'old@x.cz']) { const { account, confirmToken } = acc.signup(e, ['27082440'], { consentText: 'x' }); acc.confirm(confirmToken); ids[e] = account; }
+    Object.assign(ids['paid@x.cz'], { plan: 'starter', subscription: 'sub_1', stripeCustomer: 'cus_1' });
+    ids['old@x.cz'].unsubscribed = true; acc.save(); // unsubscribed before deletion existed
+    try {
+        const h = await (await post(`${url}/unsubscribe?t=${ids['u@x.cz'].unsubToken}`, {})).text();
+        assert.match(h, /will be deleted on \d{4}-\d{2}-\d{2}/); assert.doesNotMatch(h, /paid plan/);
+        assert.match(await (await post(`${url}/unsubscribe?t=${ids['paid@x.cz'].unsubToken}`, {})).text(), /does not cancel it/);
+    } finally { srv.close(); }
+    const later = new Accounts(file, { now: () => Date.now() + 31 * 864e5 });
+    assert.deepEqual(later.purgeDeleted(), { deleted: [ids['u@x.cz'].id], waiting: [ids['paid@x.cz'].id] });
+    assert.ok(new Accounts(file).get(ids['old@x.cz'].id).deleteAt, 'earlier unsubscribe now has a deletion date');
+    const web = new Accounts(file); // loaded before the deletion below: its save must not bring the account back
+    new Accounts(file).erase(ids['paid@x.cz'].id); web.get(ids['paid@x.cz'].id).plan = 'free'; web.save();
+    assert.equal(new Accounts(file).get(ids['paid@x.cz'].id), null);
+});

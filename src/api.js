@@ -69,6 +69,7 @@ export function createApi({ dataDir, env = process.env, now = () => Date.now(), 
         const a = found.account;
         if (!PLAN_INFO[a.plan]?.api) return { error: err(403, 'plan_required', 'API access needs the Pro or Accountant plan. Upgrade on your manage page.') };
         if (!a.confirmed) return { error: err(403, 'account_not_confirmed', 'Confirm your email address first.') };
+        if (a.deleteAt) return { error: err(403, 'account_pending_deletion', `This account is scheduled for deletion on ${a.deleteAt.slice(0, 10)}. Keep it on your manage page to use the API again.`) };
         if (!found.key.lastUsedAt || now() - Date.parse(found.key.lastUsedAt) > 10 * 60e3) { found.key.lastUsedAt = new Date(now()).toISOString(); try { acc.save(); } catch (e) { log(`api: could not save lastUsedAt: ${e.message}`); } }
         return { acc, account: a, key: found.key };
     }

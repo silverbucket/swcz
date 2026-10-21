@@ -5,11 +5,13 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { isValidIco, normaliseIco } from './ico.js';
 import { normalizeDomain } from './sources/coi.js';
+import { deleteAccountFiles } from './history.js';
 import { parseText as parseCsvText, looksLikeCsv } from './csv.js';
 
 import { PLANS, PLAN_BY_AMOUNT, PLAN_INFO, MAX_CLIENTS } from './plans.js';
 export { PLANS };
 export const TOKEN_TTL_MS = { confirm: 48 * 3600e3, manage: 24 * 3600e3 };
+export const DELETE_GRACE_DAYS = 30;
 const token = () => crypto.randomBytes(24).toString('base64url');
 const hash = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 export const normEmail = (e) => String(e ?? '').trim().toLowerCase();
@@ -123,6 +125,7 @@ export class Accounts {
         tx(this.sql, () => {
             for (const a of changed) {
                 const before = JSON.parse(this.snap.get(a.id) ?? '{}'); const row = get.get(a.id); const cur = row ? JSON.parse(row.data) : {};
+                if (!row && this.snap.has(a.id)) continue; // deleted by another process since we loaded it: don't resurrect
                 for (const k of new Set([...Object.keys(before), ...Object.keys(a)])) {
                     if (JSON.stringify(a[k]) === JSON.stringify(before[k])) continue;
                     if (a[k] === undefined) delete cur[k]; else cur[k] = a[k];
@@ -173,14 +176,37 @@ export class Accounts {
     }
     confirm(t) {
         const a = this.use(t, 'confirm'); if (!a) return null;
-        a.confirmed = true; a.unsubscribed = false;
+        a.confirmed = true; a.unsubscribed = false; delete a.deleteAt;
         a.consent = a.pendingConsent ?? a.consent; a.consent.confirmedAt = new Date(this.now()).toISOString();
         delete a.pendingConsent; return a;
+    }
+    // ---- Deletion: requested on the manage page or by unsubscribing, carried out DELETE_GRACE_DAYS later by the daily
+    // run (purgeDeleted). Checks and emails stop at once; "keep" cancels it. A running paid plan is never deleted.
+    scheduleDeletion(a) { a.deleteAt ??= new Date(this.now() + DELETE_GRACE_DAYS * 864e5).toISOString(); return a.deleteAt; }
+    keep(a) { delete a.deleteAt; a.unsubscribed = false; }
+    liveSubscription(a) { return Boolean(a.subscription && a.plan !== 'free'); }
+    /** Delete an account now: its row, its tokens and all its files. Written immediately. */
+    erase(id) {
+        tx(this.sql, () => { this.sql.prepare('DELETE FROM accounts WHERE id = ?').run(id); this.sql.prepare('DELETE FROM tokens WHERE account_id = ?').run(id); });
+        deleteAccountFiles(path.dirname(this.file), id);
+        delete this.db.accounts[id]; this.snap.delete(id);
+    }
+    /** Daily: schedule unsubscribed accounts that have no date yet, delete the ones that are due. */
+    purgeDeleted() {
+        const out = { deleted: [], waiting: [] };
+        for (const a of this.all()) {
+            if (a.unsubscribed && !a.deleteAt) this.scheduleDeletion(a);
+            if (!a.deleteAt || a.deleteAt > new Date(this.now()).toISOString()) continue;
+            if (this.liveSubscription(a)) { out.waiting.push(a.id); continue; } // deleted once Stripe ends the plan
+            this.erase(a.id); out.deleted.push(a.id);
+        }
+        this.save();
+        return out;
     }
     setIcos(a, icos, websites = {}) { return this.setIcosMain(a, icos, websites); }
     unsubscribe(t) {
         if (!t) return null;
-        const a = this.all().find((x) => x.unsubToken === t); if (a) { a.unsubscribed = true; return a; }
+        const a = this.all().find((x) => x.unsubToken === t); if (a) { a.unsubscribed = true; this.scheduleDeletion(a); return a; }
         for (const acc of this.all()) for (const c of acc.clients ?? []) for (const r of c.recipients ?? []) if (r.unsubToken === t) { r.unsubscribed = true; return acc; }
         return null;
     }
