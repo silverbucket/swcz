@@ -6,7 +6,8 @@ import { createServer } from '../src/server.js';
 import { monitoringEnabled, sitePage, writeSite } from '../src/site.js';
 import { Updates } from '../src/updates.js';
 import { runHealth, PROBE_HEADER, readHealth } from '../src/health.js';
-import { renderResult } from '../src/freecheck.js';
+import { renderResult, resultStatus } from '../src/freecheck.js';
+import { openDb } from '../src/accounts.js';
 import { runAll } from '../src/run.js';
 import { tmp, listen, post, mailbox, makeAccount, accounts } from './fixtures/helpers.js';
 
@@ -14,7 +15,7 @@ const PAUSED = { SIGNUPS_ENABLED: 'false' };
 const site = (f) => fs.readFileSync(new URL(`../site/${f}`, import.meta.url), 'utf8');
 const updates = (dataDir) => new Updates(path.join(dataDir, 'accounts.json'));
 // Free check stub: the real one needs the registers (see freecheck.test.js).
-const freeCheck = async (req, form, page) => [200, page('Check', `<h1>Firma · IČO ${form.ico ?? ''}</h1>`)];
+const freeCheck = async (req, form, page) => [200, page('Check', `<h1 data-result="ok">Firma · IČO ${form.ico ?? ''}</h1>`)];
 function setup(env = {}, opts = {}) {
     const dataDir = tmp('swpause-'); const { sent, mailer } = mailbox();
     const srv = createServer({ env, dataDir, baseUrl: 'https://sw.test', mailer, log: () => {}, freeCheck, ...opts });
@@ -53,6 +54,8 @@ test('writeSite renders every page for the setting into the served directory', (
     assert.deepEqual(fs.readdirSync(dest).sort(), ['b.png', 'g']); // no .tmp left behind
     const link = path.join(tmp('swlink-'), 'public'); fs.symlinkSync(src, link);
     for (const d of [src, link, path.join(src, 'g'), path.dirname(src)]) assert.throws(() => writeSite(src, d, false), /overlaps/, d);
+    assert.throws(() => writeSite(src, path.join(link, 'generated', 'deeper'), false), /overlaps/, 'symlink above a dest that does not exist yet');
+    assert.equal(fs.existsSync(path.join(src, 'generated')), false);
     assert.match(fs.readFileSync(path.join(src, 'g', 'a.html'), 'utf8'), /<!--if paused-->/, 'sources untouched');
 });
 
@@ -91,8 +94,13 @@ test('updates list: double opt-in, scanner-safe confirm, one-click unsubscribe d
         assert.equal((await post(`${url}/confirm?u=${u}`, '')).status, 400, 'single use');
         await post(`${url}/signup`, { updates: '1', email: 'u@firma.cz', consent: 'yes' });
         assert.equal(sent.length, 1, 'already on the list: no second confirm mail');
+        // a repeat within the cooldown sends nothing and leaves the first link working
+        await post(`${url}/signup`, { updates: '1', email: 'v@firma.cz', consent: 'yes' });
+        await post(`${url}/signup`, { updates: '1', email: 'v@firma.cz', consent: 'yes' });
+        assert.equal(sent.length, 2);
+        assert.equal((await post(`${url}/confirm?u=${linkIn(sent[1], '/confirm', 'u')}`, '')).status, 200);
         const unsub = sent[0].unsubscribeUrl.split('u=')[1];
-        assert.equal((await fetch(`${url}/unsubscribe?u=${unsub}`)).status, 200); assert.equal(updates(dataDir).confirmed().length, 1, 'GET does not unsubscribe');
+        assert.equal((await fetch(`${url}/unsubscribe?u=${unsub}`)).status, 200); assert.ok(updates(dataDir).get('u@firma.cz'), 'GET does not unsubscribe');
         assert.equal((await post(`${url}/unsubscribe?u=${unsub}`, 'List-Unsubscribe=One-Click')).status, 200);
         assert.equal(updates(dataDir).get('u@firma.cz'), null);
     } finally { srv.close(); }
@@ -116,6 +124,14 @@ test('monitoring sign-up with the updates box ticked joins the updates list when
         for (const m of sent) assert.equal((await post(`${url}/confirm`, `t=${linkIn(m, '/confirm', 't')}`)).status, 200);
         assert.deepEqual(updates(dataDir).confirmed().map((x) => [x.email, x.source]), [['a@firma.cz', 'signup']]);
         assert.equal(accounts(dataDir).byEmail('a@firma.cz').updatesOptIn, undefined);
+        // the opt-in belongs to the link of the sign-up that ticked it: a later sign-up with the box ticked by someone
+        // else does not attach it to the owner's earlier link
+        sent.length = 0;
+        await post(`${url}/signup`, { email: 'd@firma.cz', consent: 'yes', ico: '27082440' });
+        const own = linkIn(sent[0], '/confirm', 't');
+        await post(`${url}/signup`, { email: 'd@firma.cz', consent: 'yes', ico: '27082440', updates_optin: 'yes' }); // cooldown: no second mail
+        assert.equal((await post(`${url}/confirm`, `t=${own}`)).status, 200);
+        assert.equal(updates(dataDir).get('d@firma.cz'), null);
         // the updates form also works while monitoring is on
         assert.equal((await post(`${url}/signup`, { updates: '1', email: 'c@firma.cz', consent: 'yes' })).status, 200);
     } finally { srv.close(); }
@@ -150,12 +166,31 @@ test('runHealth: emails a new failure once, a changed failure set, and the recov
         assert.ok(st.failed.includes('home')); assert.equal(sent.length, 2);
         smtpOk = true; st = await run(); assert.equal(st.ok, true); assert.equal(sent.length, 3); assert.match(sent[2].subject, /OK again/);
         assert.equal(readHealth(dataDir).ok, true);
+        // an alert that could not be sent is retried next run, not marked as notified
+        const flaky = { verify: async () => { throw new Error('auth failed'); }, send: async (m) => { if (flaky.down) throw new Error('421 try later'); sent.push(m); }, down: true };
+        const runF = () => runHealth({ env: { ...PAUSED, HEALTH_EMAIL: 'me@example.org' }, dataDir, baseUrl: url, token: srv.healthToken, mailer: flaky, log: () => {} });
+        await runF(); assert.equal(sent.length, 3); assert.deepEqual(readHealth(dataDir).notified.failed, []);
+        flaky.down = false; await runF(); assert.equal(sent.length, 4); assert.match(sent[3].subject, /FAILED/);
+        await runF(); assert.equal(sent.length, 4);
+        mailer.verify = async () => ({ ok: true }); await run(); assert.match(sent[4].subject, /OK again/);
         assert.equal((await (await fetch(`${url}/healthz?detail=1`)).json()).health.ok, true);
         const dry = await runHealth({ env: PAUSED, dataDir, baseUrl: url, token: srv.healthToken, mailer: { send: async () => {}, verify: async () => ({ dry: true }) }, log: () => {} });
         assert.deepEqual(dry.failed, ['smtp']); assert.match(dry.probes.smtp.error, /not configured/);
         const unreachable = await runHealth({ env: PAUSED, dataDir: tmp(), baseUrl: 'http://127.0.0.1:9', token: 'x', mailer, log: () => {} });
         assert.deepEqual(unreachable.failed, ['home', 'signup', 'freecheck']);
     } finally { srv.close(); }
+});
+
+test('runHealth: the unrendered template and a free check where no register answered are failures', async () => {
+    const raw = fs.readFileSync(new URL('../site/index.html', import.meta.url), 'utf8');
+    for (const [page, check, bad] of [[raw, 'ok', 'home'], [sitePage(raw, false), 'error', 'freecheck'], [sitePage(raw, false), 'partial', null]]) {
+        const fetchFn = async (u, o) => new Response(o.method === 'GET' ? page : u.includes('freecheck') ? `<h1 data-result="${check}">27082440 · IČO 27082440</h1>` : 'Check your email', { status: 200 });
+        const st = await runHealth({ env: PAUSED, dataDir: tmp(), baseUrl: 'https://sw.test', token: 'x', fetchFn, mailer: { send: async () => {}, verify: async () => ({ ok: true }) }, log: () => {} });
+        assert.deepEqual(st.failed, bad ? [bad] : [], `${check}: ${JSON.stringify(st.probes)}`);
+    }
+    const r = (o) => ({ ico: '27082440', sourceErrors: [], ...o });
+    assert.equal(resultStatus(r({})), 'ok'); assert.equal(resultStatus(r({}), true), 'stale');
+    assert.equal(resultStatus(r({ ares: { found: true }, sourceErrors: ['isir: down'] })), 'partial'); assert.equal(resultStatus(r({ sourceErrors: ['ares: down', 'isir: down'] })), 'error');
 });
 
 test('free check result: paused points to the updates list instead of the monitoring sign-up', () => {
@@ -170,4 +205,10 @@ test('daily run while paused: self-check and housekeeping only, no customer chec
     let canaryRan = false;
     const s = await runAll({ env: PAUSED, dataDir, mailer: { send: async () => assert.fail('mail') }, check: async () => assert.fail('check'), canary: async () => { canaryRan = true; return { failed: [] }; }, log: () => {} });
     assert.equal(s.paused, true); assert.equal(s.checked, 0); assert.ok(canaryRan);
+    // register answers older than 30 days still go while paused (privacy policy)
+    const db = openDb(path.join(dataDir, 'accounts.json'));
+    db.prepare('INSERT INTO lookups VALUES (?, ?, ?, ?)').run('ares', 'old', '{}', Date.now() - 31 * 864e5);
+    db.prepare('INSERT INTO lookups VALUES (?, ?, ?, ?)').run('ares', 'new', '{}', Date.now());
+    await runAll({ env: PAUSED, dataDir, check: async () => assert.fail('check'), canary: async () => ({ failed: [] }), log: () => {} });
+    assert.deepEqual(db.prepare('SELECT key FROM lookups').all().map((x) => x.key), ['new']);
 });

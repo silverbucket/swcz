@@ -154,7 +154,7 @@ export class Accounts {
     limit(a) { return PLANS[a?.plan] ?? PLANS.free; }
 
     /** Create or refresh a pending signup. Returns { account, confirmToken }. */
-    signup(email, icos, { consentText, websites = {} }) {
+    signup(email, icos, { consentText, websites = {}, updatesOptIn = false }) {
         const e = normEmail(email);
         let a = this.byEmail(e);
         if (!a) {
@@ -163,8 +163,14 @@ export class Accounts {
         }
         if (!a.confirmed) { a.icos = icos.slice(0, this.limit(a)); a.websites = pickWebsites(a.icos, websites); } // confirmed users edit via the manage link
         a.pendingConsent = { text: consentText, at: new Date(this.now()).toISOString() };
-        return { account: a, confirmToken: this.issue(a.id, 'confirm') };
+        const confirmToken = this.issue(a.id, 'confirm');
+        // The updates opt-in belongs to this sign-up's link only: someone else re-submitting the form for the address
+        // must not add it to a link the owner confirms later.
+        if (updatesOptIn) a.updatesOptIn = [...(a.updatesOptIn ?? []), hash(confirmToken)].slice(-5);
+        return { account: a, confirmToken };
     }
+    /** Whether the sign-up behind confirm token `t` ticked the updates box; forgets all pending opt-ins. */
+    takeUpdatesOptIn(a, t) { const yes = (a.updatesOptIn ?? []).includes(hash(t)); delete a.updatesOptIn; return yes; }
     // Tokens are written straight to the database (no save() needed).
     issue(accountId, kind) { const t = token(); this.sql.prepare('INSERT INTO tokens VALUES (?, ?, ?, ?)').run(hash(t), accountId, kind, this.now() + TOKEN_TTL_MS[kind]); this.prune(); return t; }
     prune() { this.sql.prepare('DELETE FROM tokens WHERE exp < ?').run(this.now()); }

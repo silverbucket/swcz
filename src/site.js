@@ -14,7 +14,8 @@ export const sitePage = (html, on) => String(html).replace(BLOCK, (_, k, body) =
 
 /** Copy the site directory to `dest`, rendering every .html page for the setting. Files are replaced one by one (no gap). */
 export function writeSite(src, dest, on) {
-    const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+    // Real path of the nearest existing ancestor plus the missing part, so a symlink above a not-yet-created dest counts.
+    const real = (p) => { const abs = path.resolve(p); try { return fs.realpathSync(abs); } catch { const up = path.dirname(abs); return up === abs ? abs : path.join(real(up), path.basename(abs)); } };
     const s = real(src); const d = real(dest);
     if (d === s || d.startsWith(s + path.sep) || s.startsWith(d + path.sep)) throw new Error(`SITE_DIR ${dest} overlaps the page sources ${src}; it must be a separate directory`);
     let n = 0;

@@ -57,6 +57,12 @@ ${error ? `<p class="sw-err" role="alert">${esc(error)}</p>` : ''}
 <p class="muted">Limited to a few checks per hour. Results come straight from the public registers at the moment you check; they are information, not legal or tax advice.</p>`;
 }
 
+/** ok: every register answered; stale: a register is down, older answers shown; partial: some answered; error: none did. */
+export function resultStatus(r, stale = false) {
+    if (!r.sourceErrors.length) return stale ? 'stale' : 'ok';
+    return r.ares || r.vat || r.isir ? 'partial' : 'error';
+}
+
 export function renderResult(r, { coiUsed, stale = false, monitoring = true }) {
     const alerts = currentAlerts(r); const a = r.ares ?? {}; const v = r.vat; const rows = [];
     rows.push(['Name', a.found === false ? 'not found in ARES' : esc(a.name ?? '?')]);
@@ -71,7 +77,7 @@ export function renderResult(r, { coiUsed, stale = false, monitoring = true }) {
     if (r.isir) rows.push(['Insolvency register (ISIR)', r.isir.cases.length ? r.isir.cases.map((c) => `${esc(c.caseNo)}${c.state ? ` (${esc(c.state)})` : ''}${c.ended ? ' ended' : ''}`).join('<br>') : 'no proceedings found']);
     if (r.website) rows.push([`ČOI risky e-shops (${esc(r.website)})`, r.coi ? (r.coi.matches.length ? `<strong>LISTED</strong>: ${r.coi.matches.map((m) => esc(`${m.domain}${m.reason ? ` - ${m.reason}` : ''}`)).join('<br>')}` : 'not listed') : 'list unavailable today']);
     const errs = r.sourceErrors.length ? `<p class="muted">Some registers did not answer: ${esc(r.sourceErrors.join('; '))}. Try again later.</p>` : '';
-    return `<h1>${esc(a.name ?? r.ico)} · IČO ${esc(r.ico)}</h1>
+    return `<h1 data-result="${resultStatus(r, stale)}">${esc(a.name ?? r.ico)} · IČO ${esc(r.ico)}</h1>
 ${alerts.length ? `<p class="sw-err"><strong>Warnings:</strong><br>${alerts.map((x) => esc(ALERT_TEXT[x] ?? x)).join('<br>')}</p>` : '<p><strong>No warnings found in the checked registers today.</strong></p>'}
 <table>${rows.map(([k, val]) => `<tr><th style="text-align:left;vertical-align:top;padding:.2rem 1rem .2rem 0">${k}</th><td>${val}</td></tr>`).join('')}</table>${errs}
 ${stale ? `<p class="sw-err">A register did not answer just now, so this shows the last answer we have, from ${esc(new Date(r.checkedAt).toISOString().slice(0, 10))}. It may be out of date; check again later. / Registr právě neodpovídá, zobrazujeme poslední známá data, mohou být zastaralá.</p>` : ''}

@@ -8,7 +8,7 @@ import { Accounts } from './accounts.js';
 import { createMailer } from './mailer.js';
 import { runWatchlist } from './runner.js';
 import { checkWatchlist } from './check.js';
-import { REGISTER_SOURCES, cachedSources, markRunStart } from './lookups.js';
+import { REGISTER_SOURCES, cachedSources, markRunStart, pruneLookups } from './lookups.js';
 import { loadCoiList } from './sources/coi.js';
 import { runCanary, skipFrom } from './canary.js';
 import { pruneHistory, deleteAccountFiles, DEFAULT_HISTORY_MONTHS } from './history.js';
@@ -33,7 +33,11 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
         if (!canary || env.CANARY_DISABLED === '1') return; // tests that inject `check` run without the network canary unless they pass one
         try { const st = await canary({ env, dataDir, mailer, log }); skip = skipFrom(st); summary.sourcesFailed = st.failed; } catch (e) { log(`canary error: ${e.message}`); }
     };
-    if (!monitoringEnabled(env)) { await selfCheck(); housekeeping(acc, { env, dataDir, now, log, summary }); return { ...summary, paused: true }; }
+    if (!monitoringEnabled(env)) { // the free check keeps filling the register cache: still drop answers after KEEP_DAYS
+        await selfCheck(); housekeeping(acc, { env, dataDir, now, log, summary });
+        try { pruneLookups(dataDir, now()); } catch (e) { log(`prune lookups: ${e.message}`); }
+        return { ...summary, paused: true };
+    }
     // Every cached register answer is stale from now on: this run fetches each watched IČO once (shared by all
     // lists that watch it, and with free checks) and leaves fresh answers for the free check until the next run.
     markRunStart(dataDir, now());

@@ -177,8 +177,10 @@ ${reportsHtml(a, t, c.id)}
             const done = () => send(200, page('Check your email', `<h1>Check your email / Zkontrolujte e-mail</h1><p>To join the updates list, click the link we sent to ${esc(email)}. / Pro přihlášení k odběru klikněte na odkaz v e-mailu.</p>`));
             if (f.fax || isProbe(req)) return done(); // honeypot; health check: validated, nothing stored or sent
             if (!mailLimit.allow(clientIp(req))) return tooMany(send);
-            const r = new Updates(accFile, { now }).request(email);
-            if (r.confirmToken && !cooldown('updates', email)) {
+            const up = new Updates(accFile, { now });
+            // Cooldown first: a new request replaces the pending link, and within the cooldown no new email would carry it.
+            const r = !up.get(email)?.confirmed_at && !cooldown('updates', email) ? up.request(email) : {};
+            if (r.confirmToken) {
                 await mailer.send({ to: email, unsubscribeUrl: `${baseUrl}/unsubscribe?u=${r.unsub}`, subject: 'Confirm Supplier Watch updates / Potvrďte odběr novinek',
                     text: `Please confirm that you want occasional emails about Supplier Watch updates, for example when daily supplier monitoring is back (link valid 48 hours):\nPotvrďte prosím, že chcete dostávat občasné e-maily o novinkách Supplier Watch, například až se vrátí denní sledování dodavatelů (odkaz platí 48 hodin):\n\n${baseUrl}/confirm?u=${r.confirmToken}\n\nIf you did not ask for this, ignore this email. / Pokud jste o to nežádali, e-mail ignorujte.` });
             }
@@ -196,9 +198,7 @@ ${reportsHtml(a, t, c.id)}
             if (!icos.length) return send(400, page('Error', `<p>No valid IČO found. / Nenalezeno žádné platné IČO.${invalid.length ? ` Invalid: ${esc(invalid.join(', '))}` : ''}</p><p><a href="/#signup">Back</a></p>`));
             if (isProbe(req)) return send(200, page('Check your email', '<h1>Check your email / Zkontrolujte e-mail</h1>')); // health check: validated, nothing stored or sent
             const acc = new Accounts(accFile, { now });
-            const { account, confirmToken } = acc.signup(email, icos, { consentText: CONSENT_TEXT, websites });
-            if (f.updates_optin === 'yes') account.updatesOptIn = true; else delete account.updatesOptIn; // added to the updates list on confirm
-            acc.save();
+            const { account, confirmToken } = acc.signup(email, icos, { consentText: CONSENT_TEXT, websites, updatesOptIn: f.updates_optin === 'yes' }); acc.save();
             if (!cooldown("signup", email)) {
                 await mailer.send({ to: email, unsubscribeUrl: unsubUrl(account), subject: 'Confirm your Supplier Watch sign-up / Potvrďte registraci',
                     text: `Please confirm your email to start daily supplier checks (link valid 48 hours):\nPotvrďte prosím e-mail pro spuštění denních kontrol (odkaz platí 48 hodin):\n\n${baseUrl}/confirm?t=${confirmToken}\n\nYou can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.\nTarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.\n\nIf you did not sign up, ignore this email. / Pokud jste se neregistrovali, e-mail ignorujte.` });
@@ -218,7 +218,7 @@ ${reportsHtml(a, t, c.id)}
             if (req.method !== 'POST') return send(200, page('Confirm your email', `<h1>Confirm your email / Potvrďte e-mail</h1><form method="post" action="/confirm">${hidden(t)}<button>Confirm and start daily checks / Potvrdit</button></form>`));
             const acc = new Accounts(accFile, { now }); const a = acc.confirm(t);
             if (!a) return send(400, page('Link expired', '<p>This link is invalid or expired. Sign up again on the <a href="/#signup">home page</a>.</p>'));
-            if (a.updatesOptIn) { new Updates(accFile, { now }).addConfirmed(a.email, UPDATES_CONSENT, 'signup'); delete a.updatesOptIn; }
+            if (acc.takeUpdatesOptIn(a, t)) new Updates(accFile, { now }).addConfirmed(a.email, UPDATES_CONSENT, 'signup');
             const mt = acc.issue(a.id, 'manage'); acc.save();
             return send(200, manageHtml(acc, a, mt, '<p><strong>Email confirmed. Daily checks start tomorrow at 06:30 Prague time. / E-mail potvrzen.</strong></p>'));
         }
