@@ -53,7 +53,7 @@ export function cachedSources(dataDir, { sources = REGISTER_SOURCES, now = () =>
         async dph(dics) {
             const subjects = new Map(); let generated = null; const missing = [];
             const use = (dic, v) => { generated = v.generated; if (v.subject) subjects.set(dic, v.subject); };
-            for (const dic of dics) { const hit = fresh('dph', dic); if (hit) use(dic, hit.value); else missing.push(dic); }
+            for (const dic of new Set(dics)) { const hit = fresh('dph', dic); if (hit) use(dic, hit.value); else missing.push(dic); } // suppliers can share a DIČ
             // Share in-flight requests per DIČ (concurrent free checks of the same supplier); batch only the rest.
             const toFetch = missing.filter((dic) => !inFlight.has(`dph:${dic}`));
             if (toFetch.length) {
