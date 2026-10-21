@@ -101,7 +101,11 @@ test('Stripe review fixes: a recovered subscription is live again; a portal plan
     const { account: a } = acc.signup('t@x.cz', [], { consentText: 'c' });
     acc.applyStripe({ type: 'checkout.session.completed', data: { object: { client_reference_id: a.id, customer: 'cus_1', subscription: 'sub_1', metadata: { plan: 'starter' } } } });
     const upd = (status, price) => acc.applyStripe({ type: 'customer.subscription.updated', data: { object: { id: 'sub_1', customer: 'cus_1', status, metadata: { plan: 'starter' }, items: { data: [{ price }] } } } });
-    upd('unpaid', { unit_amount: 19000 }); assert.equal(a.plan, 'free'); assert.equal(a.subscription, null);
+    upd('unpaid', { unit_amount: 19000 }); assert.equal(a.plan, 'free'); assert.equal(a.subscription, 'sub_1', 'still the account\'s subscription'); assert.ok(!acc.liveSubscription(a));
+    // A delayed event of an older subscription of the same customer, arriving while sub_1 is unpaid, is ignored.
+    acc.applyStripe({ type: 'customer.subscription.updated', data: { object: { id: 'sub_0', customer: 'cus_1', status: 'active', items: { data: [{ price: { unit_amount: 99000 } }] } } } });
+    assert.equal(a.subscription, 'sub_1'); assert.equal(a.plan, 'free');
     upd('active', { unit_amount: 19000 }); assert.equal(a.plan, 'starter'); assert.equal(a.subscription, 'sub_1'); assert.ok(acc.liveSubscription(a));
     upd('active', { unit_amount: 49000 }); assert.equal(a.plan, 'pro', 'switched to Pro in the portal; subscription metadata still says starter');
+    acc.applyStripe({ type: 'customer.subscription.deleted', data: { object: { id: 'sub_1', customer: 'cus_1' } } }); assert.equal(a.subscription, null); assert.equal(a.plan, 'free');
 });

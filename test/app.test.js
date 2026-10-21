@@ -309,3 +309,22 @@ test('review fixes: an account erased mid-run leaves no files; a paused account 
     const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'state', `${ids['paused@x.cz'].id}.json`), 'utf8'));
     assert.deepEqual(Object.keys(st.facts), ['27082440']); assert.deepEqual(Object.keys(st.latest), ['27082440']);
 });
+
+test('review fixes: a client recipient who unsubscribes during an earlier send gets neither the alert nor the monthly report', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swrun-'));
+    const file = path.join(dataDir, 'accounts.json');
+    const acc = new Accounts(file); const { account, confirmToken } = acc.signup('acct@x.cz', [], { consentText: 'x' }); acc.confirm(confirmToken);
+    account.plan = 'accountant'; const { client } = acc.addClient(account, 'Klient'); acc.setClientIcos(account, client.id, ['27082440']); acc.setClientRecipients(account, client.id, 'r1@x.cz, r2@x.cz'); acc.save();
+    let vat = 'NE';
+    const check = async (items) => ({ errors: {}, rows: items.map((i) => ({ ico: i.ico, sourceErrors: [], ares: { found: true, name: 'X' }, vat: { subjectType: 'PLATCE_DPH', unreliable: vat, accounts: [] }, isir: { cases: [] } })) });
+    const sent = []; const r2 = () => new Accounts(file).get(account.id).clients[0].recipients[1].unsubToken;
+    const mailer = { send: async (m) => { sent.push(m.to); if (m.to === 'r1@x.cz') { const w = new Accounts(file); w.unsubscribe(r2()); w.save(); } } };
+    const day = (d) => () => new Date(`2026-10-${d}T05:00:00Z`).getTime();
+    await runAll({ dataDir, mailer, check, log: () => {}, now: day('01') });
+    vat = 'ANO'; sent.length = 0;
+    await runAll({ dataDir, mailer, check, log: () => {}, now: day('02') });
+    assert.deepEqual(sent, ['acct@x.cz', 'r1@x.cz'], 'alert: r2 unsubscribed while r1 was being emailed');
+    const w = new Accounts(file); const rr = w.get(account.id).clients[0].recipients[1]; rr.unsubscribed = false; w.save(); sent.length = 0;
+    await runAll({ dataDir, mailer, check, log: () => {}, now: () => new Date('2026-11-01T05:00:00Z').getTime() });
+    assert.deepEqual(sent, ['acct@x.cz', 'r1@x.cz'], 'monthly report: r2 unsubscribed while r1 was being emailed');
+});

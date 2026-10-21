@@ -107,8 +107,11 @@ export async function sendMonthlyReports({ dataDir, acc, mailer, baseUrl, now = 
                 text: `Your monthly supplier check report for ${monthLabel(month)} is attached (PDF). It lists every check we ran, per supplier, with results and times. Keep it with your records as evidence that you checked your suppliers.\nV příloze je měsíční protokol o kontrolách dodavatelů za ${month}.\n\nYou can also download reports from your manage page: ${baseUrl}/#manage`,
                 attachments: [{ filename: `supplierwatch-report-${month}.pdf`, content: buf, contentType: 'application/pdf' }] });
             sent++;
-            if (PLAN_INFO[cur.plan]?.clients) for (const c of cur.clients ?? []) for (const r of (c.recipients ?? []).filter((x) => !x.unsubscribed)) {
-                if (!recs.some((x) => x.list === c.id)) continue;
+            // Re-read right before each recipient's email: an unsubscribe, a removed recipient or a deletion request made
+            // during an earlier send stops it.
+            const recipientOk = (c, r) => { const x = acc.fresh(a.id); return Boolean(x?.confirmed && !x.unsubscribed && !x.deleteAt && PLAN_INFO[x.plan]?.clients && x.clients?.find((y) => y.id === c.id)?.recipients?.some((y) => y.email === r.email && !y.unsubscribed)); };
+            if (PLAN_INFO[cur.plan]?.clients) for (const c of cur.clients ?? []) for (const r of c.recipients ?? []) {
+                if (!recs.some((x) => x.list === c.id) || !recipientOk(c, r)) continue;
                 await mailer.send({ to: r.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${r.unsubToken}`, subject: `Supplier Watch: ${c.name} supplier check report ${monthLabel(month)}`,
                     text: `${cur.email} set up Supplier Watch checks for ${c.name}. The ${monthLabel(month)} report is attached (PDF).`, attachments: [{ filename: `supplierwatch-report-${month}.pdf`, content: getReport(dataDir, cur, month, { clientId: c.id, now }), contentType: 'application/pdf' }] });
             }

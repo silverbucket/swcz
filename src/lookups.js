@@ -34,10 +34,10 @@ export function cachedSources(dataDir, { sources = REGISTER_SOURCES, now = () =>
     // The registers a check of this IČO asks, as [source, key], following checkWatchlist: VAT by the DIČ from ARES
     // (else CZ + IČO), the public register only for subjects ARES flags as in it. Unknown until ARES has answered.
     const used = (ico, isir) => {
-        const ares = row('ares', ico); if (!ares) return [['ares', ico]];
-        const out = [['ares', ico], ['dph', (ares.value?.dic ?? `CZ${ico}`).replace(/^CZ/, '')]];
+        const out = [['ares', ico]]; if (isir) out.push(['isir', ico]); // ISIR is asked even when ARES does not answer
+        const ares = row('ares', ico); if (!ares) return out;
+        out.push(['dph', (ares.value?.dic ?? `CZ${ico}`).replace(/^CZ/, '')]);
         if (ares.value?.found && ares.value.aresPublicRegisterFlag === 'AKTIVNI') out.push(['vr', ico]);
-        if (isir) out.push(['isir', ico]);
         return out;
     };
     const inFlight = new Map(); // concurrent callers of the same lookup share one request

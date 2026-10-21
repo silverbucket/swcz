@@ -63,13 +63,15 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
                 const r = await runWatchlist(items, { name, statePath: path.join(dataDir, 'state', `${name}.json`), outDir: path.join(dataDir, 'reports'), isirEnabled, log, check: doCheck, skip, now, deferState: true,
                     coi: coiEnabled && items.some((i) => i.website) ? await getCoi() : undefined, history: { dataDir, accountId: a.id, list: l.key, client: l.name } });
                 summary.checked++;
-                const cur = acc.fresh(id); // again after the register requests, which can take a while
-                if (((r.changed && !r.firstRun) || r.newAlerts) && active(cur)) {
+                // Re-read right before every email: an unsubscribe (owner or recipient), a removed recipient or a deletion
+                // request made during the register requests or an earlier send stops it.
+                const ownerOk = () => active(acc.fresh(id));
+                const recipientOk = (rc) => { const x = acc.fresh(id); return active(x) && Boolean(x.clients?.find((c) => c.id === l.clientId)?.recipients?.some((y) => y.email === rc.email && !y.unsubscribed)); };
+                if (((r.changed && !r.firstRun) || r.newAlerts) && ownerOk()) {
                     const head = l.name ? `Client / Klient: ${l.name}\n\n` : '';
-                    const stillSubscribed = (rc) => cur.clients?.find((c) => c.id === l.clientId)?.recipients?.some((x) => x.email === rc.email && !x.unsubscribed);
                     const what = r.changed && !r.firstRun ? ['changes detected', 'Zjištěny změny'] : ['warnings found', 'Nalezena upozornění'];
                     await mailer.send({ to: a.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${a.unsubToken}`, subject: `Supplier Watch: ${what[0]}${l.name ? ` (${l.name})` : ''} / ${what[1]}`, text: `${head}${r.text}\n\nEdit your list: ${baseUrl}/#manage` });
-                    for (const rc of l.recipients.filter(stillSubscribed)) await mailer.send({ to: rc.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${rc.unsubToken}`, subject: `Supplier Watch: ${what[0]} (${l.name}) / ${what[1]}`, text: `${head}${r.text}\n\nThese alerts were set up for you by ${a.email}.` });
+                    for (const rc of l.recipients) if (recipientOk(rc)) await mailer.send({ to: rc.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${rc.unsubToken}`, subject: `Supplier Watch: ${what[0]} (${l.name}) / ${what[1]}`, text: `${head}${r.text}\n\nThese alerts were set up for you by ${a.email}.` });
                     summary.emailed++;
                 }
                 r.saveState(); // only after the alert went out (a throw above leaves yesterday's state, so it re-alerts)

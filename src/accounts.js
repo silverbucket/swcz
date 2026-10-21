@@ -303,7 +303,9 @@ export class Accounts {
             const price = o.items?.data?.[0]?.price;
             // The current price decides: subscription metadata is set at checkout and not updated by a portal plan switch.
             a.plan = active ? (meta(price?.metadata) ?? PLAN_BY_AMOUNT[price?.unit_amount] ?? meta(o.metadata) ?? a.plan) : 'free';
-            a.subscription = active ? (o.id ?? a.subscription) : null; // e.g. unpaid -> active again: the subscription is live
+            // The subscription id is the account's identity at Stripe, kept through unpaid / past-due spells (so events of
+            // another subscription stay rejected) and cleared only when this subscription is deleted.
+            a.subscription = ev.type === 'customer.subscription.deleted' ? null : (o.id ?? a.subscription);
             // cancel_at_period_end: plan stays until Stripe sends subscription.deleted at period end.
             a.cancelAt = active && o.cancel_at_period_end ? (o.cancel_at ?? o.current_period_end ?? o.items?.data?.[0]?.current_period_end ?? null) : null;
             // Over the new limit: keep the first N; the rest stay stored so an upgrade restores them.

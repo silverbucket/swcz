@@ -139,6 +139,17 @@ test('review fixes: an old VAT answer is flagged even when ARES and ISIR are fre
     });
 });
 
+test('review fixes: an old ISIR answer is flagged even when ARES has never answered', async () => {
+    let t = Date.parse('2026-10-21T08:00:00Z'); const reg = registers(); let isirDown = false;
+    const sources = { ...reg, ares: async () => { throw new Error('down'); }, isir: async (i) => { if (isirDown) throw new Error('down'); return reg.isir(i); } };
+    const fc = createFreeCheck({ env: {}, dataDir: tmpDir(), sources, loadCoi: async () => null, now: () => t });
+    await withServer(fc, async (url) => {
+        await post(url, { ico: '27082440' }); // ARES down, ISIR answers
+        t += 37 * 3600e3; isirDown = true;
+        assert.match(await (await post(url, { ico: '27082440' })).text(), /last answer we have, from 2026-10-21/);
+    });
+});
+
 test('static SEO files: guides, sitemap, robots, internal links', async () => {
     await withServer(createFreeCheck({ env: {}, dataDir: '/tmp', check: async () => ({ rows: [] }) }), async (url) => {
         const sm = await (await fetch(`${url}/sitemap.xml`)).text();
