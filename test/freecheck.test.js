@@ -30,6 +30,8 @@ test('rate limiter: per IP and global caps, window expiry', () => {
     t = 1001; assert.ok(l.allow('a'));
     assert.equal(clientIp({ headers: { 'x-forwarded-for': '9.9.9.9, 127.0.0.1' } }), '9.9.9.9');
     assert.equal(clientIp({ headers: {}, socket: { remoteAddress: '::1' } }), '::1');
+    assert.equal(clientIp({ headers: { 'x-forwarded-for': '6.6.6.6, 9.9.9.9' } }), '9.9.9.9', 'client-supplied entries are ignored');
+    assert.equal(clientIp({ headers: { 'x-forwarded-for': '6.6.6.6, 9.9.9.9, 10.0.0.2' } }), '9.9.9.9');
 });
 
 test('GET /check shows the form; invalid IČO and website rejected without running checks', async () => {

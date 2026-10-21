@@ -28,7 +28,7 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
             const items = l.icos.map((ico) => ({ ico, label: null, expectedAccount: null, website: l.websites?.[ico] ?? null }));
             const name = l.clientId ? `${a.id}--${l.clientId}` : a.id;
             try {
-                const r = await runWatchlist(items, { name, statePath: path.join(dataDir, 'state', `${name}.json`), outDir: path.join(dataDir, 'reports'), isirEnabled, log, check, skip, now,
+                const r = await runWatchlist(items, { name, statePath: path.join(dataDir, 'state', `${name}.json`), outDir: path.join(dataDir, 'reports'), isirEnabled, log, check, skip, now, deferState: true,
                     coi: coiEnabled && items.some((i) => i.website) ? await getCoi() : undefined, history: { dataDir, accountId: a.id, list: l.key, client: l.name } });
                 summary.checked++;
                 if (r.changed && !r.firstRun) {
@@ -37,6 +37,7 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
                     for (const rc of l.recipients) await mailer.send({ to: rc.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${rc.unsubToken}`, subject: `Supplier Watch: changes detected (${l.name}) / Zjištěny změny`, text: `${head}${r.text}\n\nThese alerts were set up for you by ${a.email}.` });
                     summary.emailed++;
                 }
+                r.saveState(); // only after the alert went out (a throw above leaves yesterday's state, so it re-alerts)
             } catch (e) { summary.failed++; log(`account ${a.id} list ${l.key} failed: ${e.message}`); }
         }
     }

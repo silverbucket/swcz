@@ -54,3 +54,19 @@ test('end-to-end with stubbed sources', async () => {
     assert.deepEqual(currentAlerts(rows[0]), ['EXPECTED_ACCOUNT_NOT_PUBLISHED']);
     assert.equal(facts(rows[0]).isirCases, undefined);
 });
+
+test('ARES outage: a sole trader keeps its DIČ for the VAT lookup; unknown DIČ means VAT not checked, never "not in register"', async () => {
+    const dic = '8001011234'; let aresUp = true; let asked;
+    const sources = {
+        ares: async () => { if (!aresUp) throw new Error('down'); return { found: true, name: 'Jan Novák', dic: `CZ${dic}` }; },
+        dph: async (dics) => { asked = dics; return { subjects: new Map(dics.filter((d) => d === dic).map((d) => [d, { subjectType: 'PLATCE_DPH', unreliable: 'NE', accounts: ['123/0100'] }])) }; },
+        isir: async () => ({ cases: [] }),
+    };
+    const day1 = (await checkWatchlist([{ ico: '27082440' }], { sources })).rows[0];
+    aresUp = false;
+    const day2 = (await checkWatchlist([{ ico: '27082440', dic: facts(day1).dic }], { sources })).rows[0];
+    assert.deepEqual(asked, [dic]); assert.deepEqual(changes(facts(day1), facts(day2)), []);
+    const none = (await checkWatchlist([{ ico: '27082440' }], { sources })).rows[0];
+    assert.equal(none.vat, undefined); assert.match(none.sourceErrors.join(), /dph: DIČ unknown/);
+    assert.deepEqual(changes(facts(day1), facts(none)), []);
+});

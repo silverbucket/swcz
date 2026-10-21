@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { createServer } from '../src/server.js';
 import { runAll } from '../src/run.js';
 import { tmp, icos, fakeWorld, mailbox, listen, post, makeAccount, accounts } from './fixtures/helpers.js';
@@ -56,9 +56,9 @@ test('API auth: missing, malformed, unknown and revoked keys -> 401 with error J
 test('API keys are stored hashed only; revoking via the store stops a working key immediately', async () => {
     const w = await world();
     try {
-        const raw = fs.readFileSync(path.join(w.dataDir, 'accounts.json'), 'utf8');
+        const raw = new DatabaseSync(path.join(w.dataDir, 'accounts.db')).prepare('SELECT data FROM accounts').all().map((r) => r.data).join('\n');
         for (const k of [w.keyA, w.keyB, w.keyD, w.keyS]) assert.ok(!raw.includes(k), 'plaintext key must not be stored');
-        assert.match(raw, /"hash": "[0-9a-f]{64}"/);
+        assert.match(raw, /"hash":"[0-9a-f]{64}"/);
         assert.equal((await w.get('/api/v1/account', w.keyB)).status, 200);
         const acc = accounts(w.dataDir); const b = acc.get(w.b.id); acc.revokeApiKey(b, b.apiKeys[0].id); acc.save();
         const r = await w.get('/api/v1/account', w.keyB); assert.equal(r.status, 401); assert.equal((await r.json()).error.code, 'revoked_api_key');

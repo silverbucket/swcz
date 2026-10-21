@@ -19,10 +19,14 @@ export class RateLimiter {
     }
 }
 
-/** Client IP: nginx appends the peer to X-Forwarded-For; the first entry is the original client. */
+const PRIVATE_IP = /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::1$|f[cd]|::ffff:(127|10|192\.168)\.)/i;
+/**
+ * Client IP: nginx appends the peer to X-Forwarded-For, and anything to its left is client-supplied (spoofable).
+ * So take the rightmost entry that is not one of our own (private/loopback) proxies.
+ */
 export function clientIp(req) {
     const xff = String(req.headers['x-forwarded-for'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-    return xff[0] || req.socket?.remoteAddress || 'unknown';
+    return xff.reverse().find((ip) => !PRIVATE_IP.test(ip)) || xff[0] || req.socket?.remoteAddress || 'unknown';
 }
 
 const ALERT_TEXT = {

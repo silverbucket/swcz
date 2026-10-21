@@ -105,3 +105,46 @@ test('mailer dry-run writes outbox with unsubscribe link and header', async () =
     const f = JSON.parse(fs.readFileSync(path.join(dir, 'outbox', fs.readdirSync(path.join(dir, 'outbox'))[0]), 'utf8'));
     assert.match(f.text, /Unsubscribe.*t=abc/); assert.equal(f.headers['List-Unsubscribe'], '<https://sw.test/unsubscribe?t=abc>');
 });
+
+test('daily run: a failed alert email is retried the next day, not lost', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swrun-'));
+    const acc = new Accounts(path.join(dataDir, 'accounts.json'));
+    const { confirmToken } = acc.signup('m@x.cz', ['27082440'], { consentText: 'x' }); acc.confirm(confirmToken); acc.save();
+    let unreliable = 'NE';
+    const check = async (items) => ({ errors: {}, rows: items.map((i) => ({ ico: i.ico, sourceErrors: [], ares: { name: 'X' }, vat: { unreliable, accounts: [], subjectType: 'PLATCE_DPH' }, isir: { cases: [] } })) });
+    let down = false; const sent = []; const mailer = { send: async (m) => { if (down) throw new Error('smtp down'); sent.push(m); } };
+    await runAll({ dataDir, mailer, check, log: () => {} });
+    unreliable = 'ANO'; down = true;
+    const s = await runAll({ dataDir, mailer, check, log: () => {} }); assert.equal(s.failed, 1);
+    down = false;
+    await runAll({ dataDir, mailer, check, log: () => {} }); assert.equal(sent.length, 1);
+    await runAll({ dataDir, mailer, check, log: () => {} }); assert.equal(sent.length, 1, 'sent once, then baseline updated');
+});
+
+test('daily run does not overwrite an unsubscribe or plan change made while it was running', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swrun-'));
+    const file = path.join(dataDir, 'accounts.json');
+    const acc = new Accounts(file);
+    const { account, confirmToken } = acc.signup('r@x.cz', ['27082440'], { consentText: 'x' }); acc.confirm(confirmToken); acc.save();
+    const check = async (items) => {
+        const web = new Accounts(file); web.unsubscribe(account.unsubToken); web.get(account.id).plan = 'pro'; web.save(); // web app, mid-run
+        return { errors: {}, rows: items.map((i) => ({ ico: i.ico, sourceErrors: [], ares: { name: 'X' }, isir: { cases: [] } })) };
+    };
+    // The run also writes (monthly report bookkeeping) to the same account: both changes must survive.
+    const day = new Date('2026-10-01T05:00:00Z').getTime();
+    fs.mkdirSync(path.join(dataDir, 'history', account.id), { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'history', account.id, '2026-09.jsonl'), `${JSON.stringify({ at: '2026-09-10T05:00:00Z', list: 'main', ico: '27082440', checks: {} })}\n`);
+    await runAll({ dataDir, mailer: { send: async () => {} }, check, log: () => {}, now: () => day });
+    const after = new Accounts(file).get(account.id);
+    assert.equal(after.unsubscribed, true); assert.equal(after.plan, 'pro'); assert.deepEqual(after.reportsSent, ['2026-09']);
+});
+
+test('accounts.json is imported into SQLite once and kept as .migrated', () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swmig-'));
+    const file = path.join(dataDir, 'accounts.json');
+    fs.writeFileSync(file, JSON.stringify({ accounts: { acc_1: { id: 'acc_1', email: 'old@x.cz', plan: 'pro', icos: [], confirmed: true } }, tokens: { [crypto.createHash('sha256').update('tok').digest('hex')]: { accountId: 'acc_1', kind: 'manage', exp: Date.now() + 3600e3 } } }));
+    const acc = new Accounts(file);
+    assert.equal(acc.byEmail('old@x.cz').plan, 'pro'); assert.equal(acc.use('tok', 'manage').id, 'acc_1');
+    assert.ok(!fs.existsSync(file)); assert.ok(fs.existsSync(`${file}.migrated`));
+    assert.equal(new Accounts(file).all().length, 1);
+});

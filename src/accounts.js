@@ -1,7 +1,8 @@
-// Customer accounts: double opt-in, magic links, plan + supplier limit. Stored as one JSON file.
+// Customer accounts: double opt-in, magic links, plan + supplier limit. Stored in SQLite (one JSON row per account).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { isValidIco, normaliseIco } from './ico.js';
 import { normalizeDomain } from './sources/coi.js';
 import { parseText as parseCsvText, looksLikeCsv } from './csv.js';
@@ -74,9 +75,60 @@ export const pickWebsites = (icos, websites = {}) => Object.fromEntries(icos.fil
 /** Supplier list as editable text: "IČO website" per line. */
 export const suppliersText = (a) => a.icos.map((i) => (a.websites?.[i] ? `${i} ${a.websites[i]}` : i)).join('\n');
 
+const conns = new Map();
+const tx = (db, fn) => { db.exec('BEGIN IMMEDIATE'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } };
+/** SQLite store next to the legacy JSON file (accounts.json -> accounts.db), shared by the web app and the daily run. */
+function openDb(file) {
+    const dbFile = file.replace(/\.json$/, '') + '.db';
+    if (conns.has(dbFile)) return conns.get(dbFile);
+    fs.mkdirSync(path.dirname(dbFile), { recursive: true });
+    const db = new DatabaseSync(dbFile);
+    fs.chmodSync(dbFile, 0o600);
+    db.exec(`PRAGMA busy_timeout = 10000; PRAGMA journal_mode = WAL;
+        CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS tokens (hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, kind TEXT NOT NULL, exp INTEGER NOT NULL);`);
+    if (fs.existsSync(file)) { // one-time import of the old JSON store; the file is kept as accounts.json.migrated
+        tx(db, () => {
+            if (db.prepare('SELECT 1 FROM accounts LIMIT 1').get()) return;
+            const old = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const put = db.prepare('INSERT INTO accounts (id, data) VALUES (?, ?)'); const tok = db.prepare('INSERT OR IGNORE INTO tokens VALUES (?, ?, ?, ?)');
+            for (const a of Object.values(old.accounts ?? {})) put.run(a.id, JSON.stringify(a));
+            for (const [h, v] of Object.entries(old.tokens ?? {})) tok.run(h, v.accountId, v.kind, v.exp);
+        });
+        try { fs.renameSync(file, `${file}.migrated`); } catch { /* another process renamed it first */ }
+    }
+    conns.set(dbFile, db);
+    return db;
+}
+
 export class Accounts {
-    constructor(file, { now = () => Date.now() } = {}) { this.file = file; this.now = now; this.db = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { accounts: {}, tokens: {} }; }
-    save() { fs.mkdirSync(path.dirname(this.file), { recursive: true }); const tmp = `${this.file}.tmp`; fs.writeFileSync(tmp, JSON.stringify(this.db, null, 1), { mode: 0o600 }); fs.renameSync(tmp, this.file); }
+    constructor(file, { now = () => Date.now() } = {}) {
+        this.file = file; this.now = now; this.sql = openDb(file);
+        const rows = this.sql.prepare('SELECT id, data FROM accounts').all();
+        this.db = { accounts: Object.fromEntries(rows.map((r) => [r.id, JSON.parse(r.data)])) };
+        this.snap = new Map(rows.map((r) => [r.id, r.data]));
+    }
+    /**
+     * Write accounts changed since load. Merge per top-level field against the current row, so a concurrent
+     * writer (web app vs. daily run) keeps the fields it changed, e.g. an unsubscribe during a long run.
+     */
+    save() {
+        const changed = this.all().filter((a) => JSON.stringify(a) !== this.snap.get(a.id));
+        if (!changed.length) return;
+        const get = this.sql.prepare('SELECT data FROM accounts WHERE id = ?');
+        const put = this.sql.prepare('INSERT INTO accounts (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data');
+        tx(this.sql, () => {
+            for (const a of changed) {
+                const before = JSON.parse(this.snap.get(a.id) ?? '{}'); const row = get.get(a.id); const cur = row ? JSON.parse(row.data) : {};
+                for (const k of new Set([...Object.keys(before), ...Object.keys(a)])) {
+                    if (JSON.stringify(a[k]) === JSON.stringify(before[k])) continue;
+                    if (a[k] === undefined) delete cur[k]; else cur[k] = a[k];
+                }
+                put.run(a.id, JSON.stringify(cur));
+            }
+        });
+        for (const a of changed) this.snap.set(a.id, JSON.stringify(a));
+    }
     get(id) { return this.db.accounts[id] ?? null; }
     byEmail(email) { const e = normEmail(email); return Object.values(this.db.accounts).find((a) => a.email === e) ?? null; }
     byStripeCustomer(cus) { return Object.values(this.db.accounts).find((a) => a.stripeCustomer === cus) ?? null; }
@@ -95,14 +147,15 @@ export class Accounts {
         a.pendingConsent = { text: consentText, at: new Date(this.now()).toISOString() };
         return { account: a, confirmToken: this.issue(a.id, 'confirm') };
     }
-    issue(accountId, kind) { const t = token(); this.db.tokens[hash(t)] = { accountId, kind, exp: this.now() + TOKEN_TTL_MS[kind] }; this.prune(); return t; }
-    prune() { for (const [k, v] of Object.entries(this.db.tokens)) if (v.exp < this.now()) delete this.db.tokens[k]; }
+    // Tokens are written straight to the database (no save() needed).
+    issue(accountId, kind) { const t = token(); this.sql.prepare('INSERT INTO tokens VALUES (?, ?, ?, ?)').run(hash(t), accountId, kind, this.now() + TOKEN_TTL_MS[kind]); this.prune(); return t; }
+    prune() { this.sql.prepare('DELETE FROM tokens WHERE exp < ?').run(this.now()); }
     /** Look up a token; confirm tokens are single use, manage tokens stay valid until expiry. */
     use(t, kind) {
-        const rec = this.db.tokens[hash(t)];
+        const h = hash(t); const rec = this.sql.prepare('SELECT account_id, kind, exp FROM tokens WHERE hash = ?').get(h);
         if (!rec || rec.kind !== kind || rec.exp < this.now()) return null;
-        if (kind === 'confirm') delete this.db.tokens[hash(t)];
-        return this.get(rec.accountId);
+        if (kind === 'confirm' && !this.sql.prepare('DELETE FROM tokens WHERE hash = ?').run(h).changes) return null;
+        return this.get(rec.account_id);
     }
     confirm(t) {
         const a = this.use(t, 'confirm'); if (!a) return null;

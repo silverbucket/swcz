@@ -4,12 +4,15 @@ import path from 'node:path';
 import { checkWatchlist, facts, currentAlerts, changes } from './check.js';
 import { buildReport } from './report.js';
 import { recordFor, appendHistory } from './history.js';
+import { normaliseIco } from './ico.js';
 
-export async function runWatchlist(items, { name, statePath, outDir, isirEnabled = true, coi, skip = {}, log = () => {}, check = checkWatchlist, history, now = () => Date.now() }) {
+export async function runWatchlist(items, { name, statePath, outDir, isirEnabled = true, coi, skip = {}, log = () => {}, check = checkWatchlist, history, now = () => Date.now(), deferState = false }) {
     // history: { dataDir, accountId, list, client } -> append one record per supplier to the check history.
+    // deferState: don't store today's facts; the caller calls saveState() once the alert email is out, so a mail
+    // failure re-detects the change tomorrow instead of losing it.
     const prev = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, 'utf8')) : { facts: {} };
     const firstRun = Object.keys(prev.facts).length === 0;
-    const res = await check(items, { isirEnabled, coi, skip, log });
+    const res = await check(items.map((i) => ({ ...i, dic: prev.facts[normaliseIco(i.ico)]?.dic })), { isirEnabled, coi, skip, log });
     const nextFacts = { ...prev.facts };
     const reportItems = res.rows.map((r) => {
         const f = facts(r);
@@ -31,8 +34,11 @@ export async function runWatchlist(items, { name, statePath, outDir, isirEnabled
     const latest = { ...(prev.latest ?? {}) };
     for (const r of records) latest[r.ico] = r;
     for (const k of Object.keys(latest)) if (!items.some((i) => String(i.ico).padStart(8, '0') === k)) delete latest[k];
-    fs.mkdirSync(path.dirname(statePath), { recursive: true });
-    fs.writeFileSync(statePath, JSON.stringify({ updatedAt: at, facts: nextFacts, latest }, null, 1));
+    const saveState = () => {
+        fs.mkdirSync(path.dirname(statePath), { recursive: true });
+        fs.writeFileSync(`${statePath}.tmp`, JSON.stringify({ updatedAt: at, facts: nextFacts, latest }, null, 1)); fs.renameSync(`${statePath}.tmp`, statePath);
+    };
+    if (!deferState) saveState();
     if (history) appendHistory(history.dataDir, history.accountId, records, new Date(now()));
     const result = { watchlist: name, firstRun, errors: res.errors, items: reportItems };
     const text = buildReport(result, { watchlist: name, firstRun, coiUsed: !!coi && items.some((i) => i.website) });
@@ -43,5 +49,5 @@ export async function runWatchlist(items, { name, statePath, outDir, isirEnabled
         fs.writeFileSync(path.join(outDir, `${name}-${stamp}.txt`), text);
     }
     const changed = reportItems.some((i) => i.changes.length);
-    return { result, text, firstRun, changed, records };
+    return { result, text, firstRun, changed, records, saveState };
 }
