@@ -50,7 +50,7 @@ ${error ? `<p class="sw-err" role="alert">${esc(error)}</p>` : ''}
 <p class="muted">Limited to a few checks per hour. Results come straight from the public registers at the moment you check; they are information, not legal or tax advice.</p>`;
 }
 
-export function renderResult(r, { coiUsed }) {
+export function renderResult(r, { coiUsed, stale = false }) {
     const alerts = currentAlerts(r); const a = r.ares ?? {}; const v = r.vat; const rows = [];
     rows.push(['Name', a.found === false ? 'not found in ARES' : esc(a.name ?? '?')]);
     if (a.address) rows.push(['Registered address', esc(a.address)]);
@@ -67,6 +67,7 @@ export function renderResult(r, { coiUsed }) {
     return `<h1>${esc(a.name ?? r.ico)} · IČO ${esc(r.ico)}</h1>
 ${alerts.length ? `<p class="sw-err"><strong>Warnings:</strong><br>${alerts.map((x) => esc(ALERT_TEXT[x] ?? x)).join('<br>')}</p>` : '<p><strong>No warnings found in the checked registers today.</strong></p>'}
 <table>${rows.map(([k, val]) => `<tr><th style="text-align:left;vertical-align:top;padding:.2rem 1rem .2rem 0">${k}</th><td>${val}</td></tr>`).join('')}</table>${errs}
+${stale ? `<p class="sw-err">A register did not answer just now, so this shows the last answer we have, from ${esc(new Date(r.checkedAt).toISOString().slice(0, 10))}. It may be out of date; check again later. / Registr právě neodpovídá, zobrazujeme poslední známá data, mohou být zastaralá.</p>` : ''}
 <p class="muted">Register data from ${esc(new Date(r.checkedAt).toISOString().slice(0, 16).replace('T', ' '))} UTC. Sources: ARES, Financial Administration VAT register, ISIR${coiUsed ? `, <a href="${COI_LICENCE_URL}">${COI_CREDIT}</a> (Supplier Watch is not affiliated with or endorsed by ČOI)` : ''}. Information only, not legal or tax advice.</p>
 <h2>Get an email when this changes</h2>
 <p>A supplier can become an unreliable VAT payer, change its bank accounts or enter insolvency at any time. Supplier Watch checks your suppliers every morning and emails you only when something changes. Free for up to 5 suppliers.</p>
@@ -83,13 +84,13 @@ export function createFreeCheck({ env = process.env, dataDir, check = checkWatch
         if (!ico || !isValidIco(ico)) return [400, page('Check a Czech supplier by IČO', checkForm({ ico: form.ico, web, error: 'That is not a valid IČO (8 digits with a checksum). / Neplatné IČO.' }))];
         const website = web ? normalizeDomain(web) : null;
         if (web && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(website)) return [400, page('Check a Czech supplier by IČO', checkForm({ ico, web, error: 'That website does not look like a domain, e.g. firma.cz.' }))];
-        lookups ??= cachedSources(dataDir, { sources, now });
+        lookups ??= cachedSources(dataDir, { sources, now, staleFallback: true });
         const isirEnabled = env.ISIR_DISABLED !== '1';
         // Answers already in the cache cost the registers nothing, so they skip the limits.
         if (!lookups.cached(ico, { isir: isirEnabled }) && !limiter.allow(clientIp(req))) return [429, page('Too many checks', `<p>Too many checks for now. Please try again in an hour, or <a href="/#signup">sign up free</a> to have up to 5 suppliers checked every day.</p>`)];
         const coi = website && env.COI_DISABLED !== '1' ? await getCoi() : undefined;
         const { rows } = await check([{ ico, website }], { isirEnabled, coi, sources: lookups });
-        const asOf = lookups.fetchedAt(ico); if (asOf) rows[0].checkedAt = new Date(asOf).toISOString(); // may be the morning's daily run
-        return [200, page(`Check result ${ico}`, renderResult(rows[0], { coiUsed: !!website && coi !== undefined }))];
+        const asOf = lookups.asOf(ico, { isir: isirEnabled }); if (asOf) rows[0].checkedAt = new Date(asOf.at).toISOString(); // may be the morning's daily run
+        return [200, page(`Check result ${ico}`, renderResult(rows[0], { coiUsed: !!website && coi !== undefined, stale: asOf?.stale }))];
     };
 }

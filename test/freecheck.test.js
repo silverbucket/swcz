@@ -101,9 +101,28 @@ test('free check reuses the daily run answers; the next daily run invalidates th
         assert.match(await r.text(), /Register data from 2026-10-21 04:30 UTC/, 'shows when the answer was fetched, not now');
         t += 3600e3; await runAll({ dataDir, mailer: { send: async () => {} }, sources: runReg, canary: null, log: () => {}, now });
         assert.equal(runReg.calls.length, 6, 'the daily run always refreshes');
-        t += 37 * 3600e3; // daily run stopped: answers too old
-        assert.equal((await post(url, { ico: '27082440' })).status, 429, 'not cached any more, so the limit applies');
+        t += 37 * 3600e3; // daily run stopped: answers too old to count as fresh, so a request is needed and the limit applies
+        assert.equal((await post(url, { ico: '27082440' })).status, 429);
     });
+});
+
+test('free check: when a register is down, the last answer is shown with its date and a warning; the daily run never uses it', async () => {
+    const dataDir = tmpDir(); let t = Date.parse('2026-10-21T04:30:00Z'); const now = () => t;
+    const acc = new Accounts(path.join(dataDir, 'accounts.json'));
+    const { confirmToken } = acc.signup('e@x.cz', ['27082440'], { consentText: 'x' }); acc.confirm(confirmToken); acc.save();
+    const reg = registers(); let down = false;
+    const flaky = { ...reg, ares: async (i) => { if (down) throw new Error('down'); return reg.ares(i); }, isir: async (i) => { if (down) throw new Error('down'); return reg.isir(i); }, dph: async (d) => { if (down) throw new Error('down'); return reg.dph(d); } };
+    await runAll({ dataDir, mailer: { send: async () => {} }, sources: flaky, canary: null, log: () => {}, now });
+    down = true; t += 4 * 864e5; // long weekend later, registers down
+    const fc = createFreeCheck({ env: {}, dataDir, sources: flaky, loadCoi: async () => null, now });
+    await withServer(fc, async (url) => {
+        const h = await (await post(url, { ico: '27082440' })).text();
+        assert.match(h, /Dodavatel s\.r\.o\./); assert.match(h, /UNRELIABLE VAT PAYER/);
+        assert.match(h, /last answer we have, from 2026-10-21/); assert.match(h, /Register data from 2026-10-21 04:30 UTC/);
+    });
+    const st = await runAll({ dataDir, mailer: { send: async () => {} }, sources: flaky, canary: null, log: () => {}, now });
+    const rec = fs.readFileSync(path.join(dataDir, 'history', acc.byEmail('e@x.cz').id, '2026-10.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1);
+    assert.equal(rec.checks.ares.status, 'failed', 'monitoring records "not checked", not the old answer'); assert.equal(rec.checks.vat.status, 'failed'); assert.equal(st.checked, 1);
 });
 
 test('static SEO files: guides, sitemap, robots, internal links', async () => {
