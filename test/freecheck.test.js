@@ -49,10 +49,10 @@ test('POST /check runs the checks once, shows warnings, ČOI match and signup CT
     const calls = []; const fc = createFreeCheck({ env: {}, dataDir: '/tmp', check: fakeCheck(calls), loadCoi: async () => coiList });
     await withServer(fc, async (url) => {
         const r = await post(url, { ico: '27082440', web: 'https://www.bad-shop.cz/x' }); const h = await r.text();
-        assert.equal(r.status, 200); assert.equal(calls.length, 1); assert.equal(calls[0].items[0].ico, '27082440'); assert.equal(calls[0].items[0].website, 'bad-shop.cz');
+        assert.equal(r.status, 200); assert.equal(calls.length, 1); assert.equal(calls[0].items[0].ico, '27082440'); assert.match(h, /bad-shop\.cz - nekontaktní/);
         assert.match(h, /Dodavatel s\.r\.o\./); assert.match(h, /UNRELIABLE VAT PAYER/); assert.match(h, /123-456\/0100/);
         assert.match(h, /ČOI list of risky e-shops/); assert.match(h, /Česká obchodní inspekce/); assert.match(h, /href="\/#signup"/); assert.match(h, /not legal or tax advice/);
-        const r2 = await post(url, { ico: '6947' }); assert.equal(r2.status, 200); assert.equal(calls[1].opts.coi, undefined, 'no website: ČOI not loaded');
+        const r2 = await post(url, { ico: '6947' }); assert.equal(r2.status, 200); assert.doesNotMatch(await r2.text(), /ČOI risky e-shops \(/, 'no website: no ČOI row');
     });
 });
 
@@ -60,11 +60,25 @@ test('POST /check is rate-limited per IP; honeypot does not run checks', async (
     const calls = []; const fc = createFreeCheck({ env: {}, dataDir: '/tmp', check: fakeCheck(calls), loadCoi: async () => null, limiter: new RateLimiter({ perIp: 2, global: 100 }) });
     await withServer(fc, async (url) => {
         assert.equal((await post(url, { ico: '27082440' })).status, 200);
-        assert.equal((await post(url, { ico: '27082440' })).status, 200);
-        assert.equal((await post(url, { ico: '27082440' })).status, 429);
-        assert.equal((await post(url, { ico: '27082440' }, '2.2.2.2')).status, 200, 'other IP unaffected');
+        assert.equal((await post(url, { ico: '09970207' })).status, 200);
+        assert.equal((await post(url, { ico: '45274649' })).status, 429);
+        assert.equal((await post(url, { ico: '27082440' })).status, 200, 'already checked today: answered from cache');
+        assert.equal((await post(url, { ico: '45274649' }, '2.2.2.2')).status, 200, 'other IP unaffected');
         await post(url, { ico: '27082440', fax: 'x' }, '3.3.3.3');
         assert.equal(calls.length, 3);
+    });
+});
+
+test('POST /check: one lookup per IČO per Prague day; failed lookups are not cached', async () => {
+    let t = Date.parse('2026-10-21T10:00:00Z'); let isirUp = false; const calls = [];
+    const check = (items, opts) => { calls.push(items); return checkWatchlist(items, { ...opts, sources: { ...sources, isir: async () => { if (!isirUp) throw new Error('down'); return { cases: [] }; } } }); };
+    const fc = createFreeCheck({ env: {}, dataDir: '/tmp', check, loadCoi: async () => coiList, now: () => t });
+    await withServer(fc, async (url) => {
+        await post(url, { ico: '27082440' }); isirUp = true;
+        await post(url, { ico: '27082440' }); assert.equal(calls.length, 2, 'ISIR failed: retried');
+        const h = await (await post(url, { ico: '27082440', web: 'bad-shop.cz' })).text(); assert.equal(calls.length, 2, 'cached');
+        assert.match(h, /LISTED/);
+        t = Date.parse('2026-10-21T22:30:00Z'); await post(url, { ico: '27082440' }); assert.equal(calls.length, 3, 'next day in Prague (00:30)');
     });
 });
 

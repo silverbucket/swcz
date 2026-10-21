@@ -1,8 +1,9 @@
 // Free one-off "check one IČO" page: runs the same checks as the daily monitor, once, without an account.
-// Abuse limits: per-IP (default 5 per hour) and a global cap (default 200 per hour), both in memory.
+// Abuse limits: per-IP (default 5 per hour) and a global cap (default 60 per hour, so with the daily run we stay
+// under ISIR's 3,000 calls a day), both in memory. Each IČO is looked up at most once per Prague day.
 import { checkWatchlist, currentAlerts } from './check.js';
 import { normaliseIco, isValidIco } from './ico.js';
-import { loadCoiList, normalizeDomain, COI_LICENCE_URL, COI_CREDIT } from './sources/coi.js';
+import { loadCoiList, normalizeDomain, matchDomain, COI_LICENCE_URL, COI_CREDIT } from './sources/coi.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -70,8 +71,8 @@ ${alerts.length ? `<p class="sw-err"><strong>Warnings:</strong><br>${alerts.map(
 <p><a class="cta" href="/#signup">Watch this supplier for free</a> <a href="/check.html">Check another IČO</a> · <a href="/guides/">Guides</a></p>`;
 }
 
-export function createFreeCheck({ env = process.env, dataDir, check = checkWatchlist, loadCoi = loadCoiList, limiter = new RateLimiter({ perIp: Number(env.FREECHECK_PER_IP || 5), global: Number(env.FREECHECK_GLOBAL || 200) }), now = () => Date.now() } = {}) {
-    let coiCache = null; let coiAt = 0;
+export function createFreeCheck({ env = process.env, dataDir, check = checkWatchlist, loadCoi = loadCoiList, limiter = new RateLimiter({ perIp: Number(env.FREECHECK_PER_IP || 5), global: Number(env.FREECHECK_GLOBAL || 60) }), now = () => Date.now() } = {}) {
+    let coiCache = null; let coiAt = 0; const cache = new Map(); let cacheDay = ''; // IČO -> check row, for today only
     const getCoi = async () => { if (!coiCache || now() - coiAt > 6 * 3600e3) { coiCache = await loadCoi({ dataDir }).catch(() => null); coiAt = now(); } return coiCache; };
     return async function handleCheck(req, form, page) {
         if (req.method !== 'POST') return [200, page('Check a Czech supplier by IČO', checkForm())];
@@ -80,9 +81,19 @@ export function createFreeCheck({ env = process.env, dataDir, check = checkWatch
         if (!ico || !isValidIco(ico)) return [400, page('Check a Czech supplier by IČO', checkForm({ ico: form.ico, web, error: 'That is not a valid IČO (8 digits with a checksum). / Neplatné IČO.' }))];
         const website = web ? normalizeDomain(web) : null;
         if (web && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(website)) return [400, page('Check a Czech supplier by IČO', checkForm({ ico, web, error: 'That website does not look like a domain, e.g. firma.cz.' }))];
-        if (!limiter.allow(clientIp(req))) return [429, page('Too many checks', `<p>Too many checks for now. Please try again in an hour, or <a href="/#signup">sign up free</a> to have up to 5 suppliers checked every day.</p>`)];
+        const day = new Date(now()).toLocaleDateString('en-CA', { timeZone: 'Europe/Prague' });
+        if (day !== cacheDay) { cache.clear(); cacheDay = day; }
+        let row = cache.get(ico);
+        if (!row) { // cached answers skip the limits: they cost the registers nothing
+            if (!limiter.allow(clientIp(req))) return [429, page('Too many checks', `<p>Too many checks for now. Please try again in an hour, or <a href="/#signup">sign up free</a> to have up to 5 suppliers checked every day.</p>`)];
+            row = (await check([{ ico }], { isirEnabled: env.ISIR_DISABLED !== '1' })).rows[0];
+            if (!row.sourceErrors.length) cache.set(ico, row); // a failed source is retried by the next check
+        }
+        // ČOI depends on the website entered, so it is matched per request against the (cached) list.
         const coi = website && env.COI_DISABLED !== '1' ? await getCoi() : undefined;
-        const { rows } = await check([{ ico, website }], { isirEnabled: env.ISIR_DISABLED !== '1', coi });
-        return [200, page(`Check result ${ico}`, renderResult(rows[0], { coiUsed: !!website && coi !== undefined }))];
+        const r = { ...row, website: website || null, sourceErrors: [...row.sourceErrors] };
+        if (coi) r.coi = { matches: matchDomain(coi.entries, website).map((e) => ({ domain: e.domain, reason: e.reason, listedOn: e.listedOn })) };
+        else if (coi === null) r.sourceErrors.push('coi: list unavailable');
+        return [200, page(`Check result ${ico}`, renderResult(r, { coiUsed: !!website && coi !== undefined }))];
     };
 }
