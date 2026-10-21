@@ -122,31 +122,39 @@ test('daily run: a failed alert email is retried the next day, not lost', async 
     await runAll({ dataDir, mailer, check, log: () => {} }); assert.equal(sent.length, 1, 'sent once, then baseline updated');
 });
 
-test('daily run does not overwrite an unsubscribe or plan change made while it was running', async () => {
+test('daily run: a change made while it runs survives its save; an unsubscribe while it runs stops its emails', async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swrun-'));
     const file = path.join(dataDir, 'accounts.json');
     const acc = new Accounts(file);
     const { account, confirmToken } = acc.signup('r@x.cz', ['27082440'], { consentText: 'x' }); acc.confirm(confirmToken); acc.save();
+    let midRun = (web) => { web.get(account.id).plan = 'pro'; };
     const check = async (items) => {
-        const web = new Accounts(file); web.unsubscribe(account.unsubToken); web.get(account.id).plan = 'pro'; web.save(); // web app, mid-run
-        return { errors: {}, rows: items.map((i) => ({ ico: i.ico, sourceErrors: [], ares: { name: 'X' }, isir: { cases: [] } })) };
+        const web = new Accounts(file); midRun(web); web.save(); // web app, mid-run
+        return { errors: {}, rows: items.map((i) => ({ ico: i.ico, sourceErrors: [], ares: { name: 'X' }, vat: { subjectType: 'PLATCE_DPH', unreliable: 'ANO', accounts: [] }, isir: { cases: [] } })) };
     };
     // The run also writes (monthly report bookkeeping) to the same account: both changes must survive.
     const day = new Date('2026-10-01T05:00:00Z').getTime();
     fs.mkdirSync(path.join(dataDir, 'history', account.id), { recursive: true });
     fs.writeFileSync(path.join(dataDir, 'history', account.id, '2026-09.jsonl'), `${JSON.stringify({ at: '2026-09-10T05:00:00Z', list: 'main', ico: '27082440', checks: {} })}\n`);
-    await runAll({ dataDir, mailer: { send: async () => {} }, check, log: () => {}, now: () => day });
-    const after = new Accounts(file).get(account.id);
-    assert.equal(after.unsubscribed, true); assert.equal(after.plan, 'pro'); assert.deepEqual(after.reportsSent, ['2026-09']);
+    const sent = []; const mailer = { send: async (m) => sent.push(m.subject) };
+    await runAll({ dataDir, mailer, check, log: () => {}, now: () => day });
+    let after = new Accounts(file).get(account.id);
+    assert.equal(after.plan, 'pro'); assert.deepEqual(after.reportsSent, ['2026-09']); assert.equal(sent.length, 2, 'warning + monthly report');
+    // Same again, but the owner unsubscribes while their list is being checked: no alert, no monthly report.
+    fs.rmSync(path.join(dataDir, 'state'), { recursive: true }); const reset = new Accounts(file); reset.get(account.id).reportsSent = []; reset.save();
+    midRun = (web) => { web.unsubscribe(account.unsubToken); }; sent.length = 0;
+    await runAll({ dataDir, mailer, check, log: () => {}, now: () => day });
+    after = new Accounts(file).get(account.id);
+    assert.equal(after.unsubscribed, true); assert.deepEqual(sent, [], 'nothing sent after unsubscribing'); assert.deepEqual(after.reportsSent, []);
 });
 
-test('accounts.json is imported into SQLite once and kept as .migrated', () => {
+test('accounts.json is imported into SQLite once, then deleted', () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swmig-'));
     const file = path.join(dataDir, 'accounts.json');
     fs.writeFileSync(file, JSON.stringify({ accounts: { acc_1: { id: 'acc_1', email: 'old@x.cz', plan: 'pro', icos: [], confirmed: true } }, tokens: { [crypto.createHash('sha256').update('tok').digest('hex')]: { accountId: 'acc_1', kind: 'manage', exp: Date.now() + 3600e3 } } }));
     const acc = new Accounts(file);
     assert.equal(acc.byEmail('old@x.cz').plan, 'pro'); assert.equal(acc.use('tok', 'manage').id, 'acc_1');
-    assert.ok(!fs.existsSync(file)); assert.ok(fs.existsSync(`${file}.migrated`));
+    assert.deepEqual(fs.readdirSync(dataDir).filter((f) => f.startsWith('accounts.json')), [], 'no copy of the old store is left behind');
     assert.equal(new Accounts(file).all().length, 1);
 });
 
@@ -232,7 +240,7 @@ test('unsubscribing schedules deletion (also for accounts unsubscribed earlier);
         assert.match(await (await post(`${url}/unsubscribe?t=${ids['paid@x.cz'].unsubToken}`, {})).text(), /does not cancel it/);
     } finally { srv.close(); }
     const later = new Accounts(file, { now: () => Date.now() + 31 * 864e5 });
-    assert.deepEqual(later.purgeDeleted(), { deleted: [ids['u@x.cz'].id], waiting: [ids['paid@x.cz'].id] });
+    assert.deepEqual(later.purgeDeleted(), { deleted: [ids['u@x.cz'].id], waiting: [ids['paid@x.cz'].id], failed: [] });
     assert.ok(new Accounts(file).get(ids['old@x.cz'].id).deleteAt, 'earlier unsubscribe now has a deletion date');
     const web = new Accounts(file); // loaded before the deletion below: its save must not bring the account back
     new Accounts(file).erase(ids['paid@x.cz'].id); web.get(ids['paid@x.cz'].id).plan = 'free'; web.save();
@@ -248,7 +256,7 @@ test('review fixes: deletion uses current rows; HEAD never confirms, unsubscribe
     const t = acc.issue(ids['head@x.cz'].id, 'manage'); acc.save();
     const run = new Accounts(file, { now: () => Date.now() + 31 * 864e5 }); // the daily run's copy, loaded early
     const web = new Accounts(file); web.keep(web.get(ids['keep@x.cz'].id)); web.keep(web.get(ids['resub@x.cz'].id)); web.save();
-    assert.deepEqual(run.purgeDeleted(), { deleted: [], waiting: [] });
+    assert.deepEqual(run.purgeDeleted(), { deleted: [], waiting: [], failed: [] });
     const now = new Accounts(file);
     assert.ok(now.get(ids['keep@x.cz'].id)); assert.equal(now.get(ids['resub@x.cz'].id).deleteAt, undefined, 'resubscribed meanwhile: not re-scheduled');
     try {
@@ -280,4 +288,24 @@ test('review fixes: emptied list loses its snapshot; API sees today\'s result ev
     await runAll({ dataDir, mailer, check, log: () => {} }); assert.equal(sent.length, 1, 'once');
     const a = new Accounts(file); a.setIcos(a.get(account.id), []); a.save();
     await runAll({ dataDir, mailer, check, log: () => {} }); assert.ok(!fs.existsSync(statePath), 'emptied list: snapshot deleted');
+});
+
+test('review fixes: an account erased mid-run leaves no files; a paused account keeps only saved suppliers in its snapshot', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swrun-'));
+    const file = path.join(dataDir, 'accounts.json');
+    const acc = new Accounts(file); const ids = {};
+    for (const e of ['gone@x.cz', 'paused@x.cz']) { const { account, confirmToken } = acc.signup(e, ['27082440', '45274649'], { consentText: 'x' }); acc.confirm(confirmToken); ids[e] = account; }
+    acc.save();
+    let eraseMidRun = false;
+    const check = async (items) => {
+        if (eraseMidRun) new Accounts(file).erase(ids['gone@x.cz'].id); // node src/admin.js delete, while this list is checked
+        return { errors: {}, rows: items.map((i) => ({ ico: i.ico, sourceErrors: [], ares: { name: 'X' }, isir: { cases: [] } })) };
+    };
+    await runAll({ dataDir, mailer: { send: async () => {} }, check, log: () => {} });
+    const p = new Accounts(file); const pa = p.get(ids['paused@x.cz'].id); pa.unsubscribed = true; p.setIcos(pa, ['27082440']); p.save();
+    eraseMidRun = true;
+    await runAll({ dataDir, mailer: { send: async () => {} }, check, log: () => {} });
+    for (const d of ['state', 'reports', 'history']) assert.ok(!fs.readdirSync(path.join(dataDir, d)).some((f) => f.startsWith(ids['gone@x.cz'].id)), d);
+    const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'state', `${ids['paused@x.cz'].id}.json`), 'utf8'));
+    assert.deepEqual(Object.keys(st.facts), ['27082440']); assert.deepEqual(Object.keys(st.latest), ['27082440']);
 });

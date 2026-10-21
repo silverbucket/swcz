@@ -92,7 +92,7 @@ export function openDb(file) {
         CREATE TABLE IF NOT EXISTS tokens (hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, kind TEXT NOT NULL, exp INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS lookups (source TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, fetched_at INTEGER NOT NULL, PRIMARY KEY (source, key));
         CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);`);
-    if (fs.existsSync(file)) { // one-time import of the old JSON store; the file is kept as accounts.json.migrated
+    if (fs.existsSync(file)) { // one-time import of the old JSON store, then the JSON file is deleted (take a backup before deploying)
         tx(db, () => {
             if (db.prepare('SELECT 1 FROM accounts LIMIT 1').get()) return;
             const old = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -100,7 +100,7 @@ export function openDb(file) {
             for (const a of Object.values(old.accounts ?? {})) put.run(a.id, JSON.stringify(a));
             for (const [h, v] of Object.entries(old.tokens ?? {})) tok.run(h, v.accountId, v.kind, v.exp);
         });
-        try { fs.renameSync(file, `${file}.migrated`); } catch { /* another process renamed it first */ }
+        fs.rmSync(file, { force: true }); // a leftover copy would keep deleted accounts' data forever
     }
     conns.set(dbFile, db);
     return db;
@@ -187,28 +187,32 @@ export class Accounts {
     liveSubscription(a) { return Boolean(a.subscription && a.plan !== 'free'); }
     /** Delete an account now: its row, its tokens and all its files. Written immediately. */
     erase(id) {
+        deleteAccountFiles(path.dirname(this.file), id); // files first: if this fails the row stays, so it can be retried
         tx(this.sql, () => { this.sql.prepare('DELETE FROM accounts WHERE id = ?').run(id); this.sql.prepare('DELETE FROM tokens WHERE account_id = ?').run(id); });
-        deleteAccountFiles(path.dirname(this.file), id);
         delete this.db.accounts[id]; this.snap.delete(id);
     }
+    /** The account as stored right now (not this instance's copy, which may be hours old in the daily run), or null. */
+    fresh(id) { const r = this.sql.prepare('SELECT data FROM accounts WHERE id = ?').get(id); return r ? JSON.parse(r.data) : null; }
     /**
      * Daily: schedule unsubscribed accounts that have no date yet, delete the ones that are due. Decides on the rows
      * as they are now, in one transaction (not on this instance's copies, which may be hours old in the daily run),
      * so a "keep", a resubscribe or a new subscription made meanwhile always wins.
      */
     purgeDeleted() {
-        const out = { deleted: [], waiting: [] }; const nowIso = new Date(this.now()).toISOString();
+        const out = { deleted: [], waiting: [], failed: [] }; const nowIso = new Date(this.now()).toISOString();
         tx(this.sql, () => {
             for (const r of this.sql.prepare('SELECT id, data FROM accounts').all()) {
                 const a = JSON.parse(r.data);
                 if (a.unsubscribed && !a.deleteAt) { this.scheduleDeletion(a); this.sql.prepare('UPDATE accounts SET data = ? WHERE id = ?').run(JSON.stringify(a), a.id); }
                 if (!a.deleteAt || a.deleteAt > nowIso) continue;
                 if (this.liveSubscription(a)) { out.waiting.push(a.id); continue; } // deleted once Stripe ends the plan
+                // Files first: if removing them fails, the row stays and tomorrow's run retries; other accounts go on.
+                try { deleteAccountFiles(path.dirname(this.file), a.id); } catch (e) { out.failed.push(`${a.id}: ${e.message}`); continue; }
                 this.sql.prepare('DELETE FROM accounts WHERE id = ?').run(a.id); this.sql.prepare('DELETE FROM tokens WHERE account_id = ?').run(a.id);
                 out.deleted.push(a.id);
             }
         });
-        for (const id of out.deleted) { deleteAccountFiles(path.dirname(this.file), id); delete this.db.accounts[id]; this.snap.delete(id); }
+        for (const id of out.deleted) { delete this.db.accounts[id]; this.snap.delete(id); }
         return out;
     }
     setIcos(a, icos, websites = {}) { return this.setIcosMain(a, icos, websites); }
@@ -297,8 +301,9 @@ export class Accounts {
             if (a.subscription && o.id && o.id !== a.subscription) return null; // an old/other subscription must not change the plan
             const active = ev.type === 'customer.subscription.updated' && ['active', 'trialing', 'past_due'].includes(o.status);
             const price = o.items?.data?.[0]?.price;
-            a.plan = active ? (meta(o.metadata) ?? meta(price?.metadata) ?? PLAN_BY_AMOUNT[price?.unit_amount] ?? a.plan) : 'free';
-            if (!active) a.subscription = null;
+            // The current price decides: subscription metadata is set at checkout and not updated by a portal plan switch.
+            a.plan = active ? (meta(price?.metadata) ?? PLAN_BY_AMOUNT[price?.unit_amount] ?? meta(o.metadata) ?? a.plan) : 'free';
+            a.subscription = active ? (o.id ?? a.subscription) : null; // e.g. unpaid -> active again: the subscription is live
             // cancel_at_period_end: plan stays until Stripe sends subscription.deleted at period end.
             a.cancelAt = active && o.cancel_at_period_end ? (o.cancel_at ?? o.current_period_end ?? o.items?.data?.[0]?.current_period_end ?? null) : null;
             // Over the new limit: keep the first N; the rest stay stored so an upgrade restores them.

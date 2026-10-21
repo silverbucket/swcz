@@ -10,8 +10,17 @@ import { checkWatchlist } from './check.js';
 import { REGISTER_SOURCES, cachedSources, markRunStart } from './lookups.js';
 import { loadCoiList } from './sources/coi.js';
 import { runCanary, skipFrom } from './canary.js';
-import { pruneHistory, DEFAULT_HISTORY_MONTHS } from './history.js';
+import { pruneHistory, deleteAccountFiles, DEFAULT_HISTORY_MONTHS } from './history.js';
 import { sendMonthlyReports } from './monthly.js';
+
+/** Keep only the given suppliers in a list snapshot (facts and latest); rewrites the file only if something goes. */
+function trimSnapshot(file, icos) {
+    let st; try { st = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return; }
+    const keep = (o) => Object.fromEntries(Object.entries(o ?? {}).filter(([k]) => icos.includes(k)));
+    const next = { ...st, facts: keep(st.facts), latest: keep(st.latest) };
+    if (JSON.stringify(next) === JSON.stringify(st)) return;
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify(next, null, 1)); fs.renameSync(`${file}.tmp`, file);
+}
 
 export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'data', mailer = createMailer(env), check, log = console.error, isirEnabled = env.ISIR_DISABLED !== '1', coiEnabled = env.COI_DISABLED !== '1', loadCoi = loadCoiList, canary = check ? null : runCanary, now = () => Date.now(), sources = REGISTER_SOURCES } = {}) {
     // Every cached register answer is stale from now on: this run fetches each watched IČO once (shared by all
@@ -30,25 +39,37 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
     let coi; let coiLoaded = false;
     const getCoi = async () => { if (!coiLoaded) { coiLoaded = true; coi = skip.coi ? null : await loadCoi({ dataDir, log }).catch(() => null); } return coi; };
     const stateDir = path.join(dataDir, 'state'); const stateFiles = fs.existsSync(stateDir) ? fs.readdirSync(stateDir) : [];
-    for (const a of acc.all()) {
-        // Snapshots of lists that are now empty or were deleted go too (register data is kept only for listed suppliers).
-        // Lists paused by a smaller plan still hold their suppliers, so they keep theirs.
-        const live = new Set([...(a.icos?.length ? [`${a.id}.json`] : []), ...(a.clients ?? []).filter((c) => c.icos.length).map((c) => `${a.id}--${c.id}.json`)]);
-        for (const f of stateFiles) if ((f === `${a.id}.json` || f.startsWith(`${a.id}--`)) && !live.has(f)) fs.rmSync(path.join(stateDir, f), { force: true });
-        if (!a.confirmed || a.unsubscribed || a.deleteAt) continue;
+    // Accounts are re-read before each list and each email (acc.fresh): an unsubscribe or deletion request made while
+    // this run is under way stops register requests and emails for that account at once.
+    const active = (x) => Boolean(x?.confirmed && !x.unsubscribed && !x.deleteAt);
+    const processed = new Set();
+    for (const { id } of acc.all()) {
+        const a = acc.fresh(id); if (!a) continue;
+        // Register data is kept only for saved suppliers: snapshots of emptied or deleted lists go, and a paused
+        // account's snapshots are trimmed to the suppliers still saved (lists paused by a smaller plan keep theirs).
+        const saved = { ...(a.icos?.length ? { [`${a.id}.json`]: a.icos } : {}), ...Object.fromEntries((a.clients ?? []).filter((c) => c.icos.length).map((c) => [`${a.id}--${c.id}.json`, c.icos])) };
+        for (const f of stateFiles) {
+            if (f !== `${a.id}.json` && !f.startsWith(`${a.id}--`)) continue;
+            if (!saved[f]) fs.rmSync(path.join(stateDir, f), { force: true }); else if (!active(a)) trimSnapshot(path.join(stateDir, f), saved[f]);
+        }
+        if (!active(a)) continue;
         for (const l of acc.lists(a)) {
             if (!l.icos.length) continue;
+            if (!active(acc.fresh(id))) break;
+            processed.add(id);
             const items = l.icos.map((ico) => ({ ico, label: null, expectedAccount: null, website: l.websites?.[ico] ?? null }));
             const name = l.clientId ? `${a.id}--${l.clientId}` : a.id;
             try {
                 const r = await runWatchlist(items, { name, statePath: path.join(dataDir, 'state', `${name}.json`), outDir: path.join(dataDir, 'reports'), isirEnabled, log, check: doCheck, skip, now, deferState: true,
                     coi: coiEnabled && items.some((i) => i.website) ? await getCoi() : undefined, history: { dataDir, accountId: a.id, list: l.key, client: l.name } });
                 summary.checked++;
-                if ((r.changed && !r.firstRun) || r.newAlerts) {
+                const cur = acc.fresh(id); // again after the register requests, which can take a while
+                if (((r.changed && !r.firstRun) || r.newAlerts) && active(cur)) {
                     const head = l.name ? `Client / Klient: ${l.name}\n\n` : '';
+                    const stillSubscribed = (rc) => cur.clients?.find((c) => c.id === l.clientId)?.recipients?.some((x) => x.email === rc.email && !x.unsubscribed);
                     const what = r.changed && !r.firstRun ? ['changes detected', 'Zjištěny změny'] : ['warnings found', 'Nalezena upozornění'];
                     await mailer.send({ to: a.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${a.unsubToken}`, subject: `Supplier Watch: ${what[0]}${l.name ? ` (${l.name})` : ''} / ${what[1]}`, text: `${head}${r.text}\n\nEdit your list: ${baseUrl}/#manage` });
-                    for (const rc of l.recipients) await mailer.send({ to: rc.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${rc.unsubToken}`, subject: `Supplier Watch: ${what[0]} (${l.name}) / ${what[1]}`, text: `${head}${r.text}\n\nThese alerts were set up for you by ${a.email}.` });
+                    for (const rc of l.recipients.filter(stillSubscribed)) await mailer.send({ to: rc.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${rc.unsubToken}`, subject: `Supplier Watch: ${what[0]} (${l.name}) / ${what[1]}`, text: `${head}${r.text}\n\nThese alerts were set up for you by ${a.email}.` });
                     summary.emailed++;
                 }
                 r.saveState(); // only after the alert went out (a throw above leaves yesterday's state, so it re-alerts)
@@ -62,7 +83,10 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
         const d = acc.purgeDeleted(); summary.deleted = d.deleted.length;
         if (d.deleted.length) log(`deleted accounts: ${d.deleted.join(', ')}`);
         if (d.waiting.length) log(`deletion due but a paid subscription is still running: ${d.waiting.join(', ')}`);
+        if (d.failed.length) log(`account deletion failed, retried tomorrow: ${d.failed.join('; ')}`);
     } catch (e) { log(`account deletion: ${e.message}`); }
+    // An account erased while its lists were being checked (node src/admin.js delete) got files written back: remove them.
+    for (const id of processed) if (!acc.fresh(id)) { try { deleteAccountFiles(dataDir, id); } catch (e) { log(`cleanup ${id}: ${e.message}`); } }
     try { const n = pruneHistory(dataDir, Number(env.HISTORY_MONTHS || DEFAULT_HISTORY_MONTHS), new Date(now())); if (n) log(`pruned ${n} old history/report files`); } catch (e) { log(`prune: ${e.message}`); }
     return summary;
 }
