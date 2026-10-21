@@ -328,3 +328,21 @@ test('review fixes: a client recipient who unsubscribes during an earlier send g
     await runAll({ dataDir, mailer, check, log: () => {}, now: () => new Date('2026-11-01T05:00:00Z').getTime() });
     assert.deepEqual(sent, ['acct@x.cz', 'r1@x.cz'], 'monthly report: r2 unsubscribed while r1 was being emailed');
 });
+
+test('review fixes: suppliers paused by a downgrade keep their snapshot, so a change is caught after re-upgrading', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swrun-'));
+    const file = path.join(dataDir, 'accounts.json');
+    const list = VALID.slice(0, 6); // 6 suppliers; free plan checks 5
+    const acc = new Accounts(file); const { account, confirmToken } = acc.signup('dg@x.cz', [], { consentText: 'x' }); acc.confirm(confirmToken);
+    account.plan = 'starter'; acc.setIcos(account, list); acc.save();
+    let addr = 'Praha 1';
+    const check = async (items) => ({ errors: {}, rows: items.map((i) => ({ ico: i.ico, sourceErrors: [], ares: { found: true, name: 'X', address: i.ico === list[5] ? addr : 'Brno' }, isir: { cases: [] } })) });
+    const sent = []; const mailer = { send: async (m) => sent.push(m) };
+    await runAll({ dataDir, mailer, check, log: () => {} });
+    const set = (plan) => { const x = new Accounts(file); x.get(account.id).plan = plan; x.save(); };
+    set('free'); await runAll({ dataDir, mailer, check, log: () => {} }); // 6th supplier paused
+    assert.ok(list[5] in JSON.parse(fs.readFileSync(path.join(dataDir, 'state', `${account.id}.json`), 'utf8')).facts, 'paused supplier keeps its snapshot');
+    addr = 'Praha 2'; set('starter');
+    await runAll({ dataDir, mailer, check, log: () => {} });
+    assert.equal(sent.length, 1); assert.match(sent[0].text, /Registered address changed/);
+});

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createServer } from '../src/server.js';
 import { createFreeCheck, RateLimiter, clientIp } from '../src/freecheck.js';
 import { Accounts } from '../src/accounts.js';
+import { cachedSources } from '../src/lookups.js';
 import { runAll } from '../src/run.js';
 
 // Fake registers that record every request they get.
@@ -148,6 +149,17 @@ test('review fixes: an old ISIR answer is flagged even when ARES has never answe
         t += 37 * 3600e3; isirDown = true;
         assert.match(await (await post(url, { ico: '27082440' })).text(), /last answer we have, from 2026-10-21/);
     });
+});
+
+test('review fixes: limiters forget IPs without new traffic and never store refused ones; concurrent VAT lookups share one request', async () => {
+    let t = 0; const l = new RateLimiter({ perIp: 1, global: 1, windowMs: 1000, now: () => t });
+    assert.ok(l.allow('a')); assert.equal(l.allow('b'), false); assert.deepEqual([...l.hits.keys()], ['a'], 'refused IP not stored');
+    t = 1001; l.sweep(); assert.equal(l.hits.size, 0, 'the timer sweep forgets IPs with no further requests');
+    const asked = []; const reg = registers();
+    const lookups = cachedSources(tmpDir(), { sources: { ...reg, dph: async (d) => { asked.push(d.join()); await new Promise((r) => setTimeout(r, 20)); return reg.dph(d); } } });
+    const [x, y] = await Promise.all([lookups.dph(['27082440']), lookups.dph(['27082440', '45274649'])]);
+    assert.ok(x.subjects.has('27082440') && y.subjects.has('27082440') && y.subjects.has('45274649'));
+    assert.deepEqual(asked, ['27082440', '45274649'], 'the second batch asks only for the DIČ not already in flight');
 });
 
 test('static SEO files: guides, sitemap, robots, internal links', async () => {

@@ -7,19 +7,21 @@ import { PLAN_INFO } from './plans.js';
 import { readHistory, pragueMonth, prevMonth } from './history.js';
 import { readStatus } from './canary.js';
 import { isValidIco } from './ico.js';
-import { clientIp } from './freecheck.js';
+import { clientIp, sweepHits } from './freecheck.js';
 
 export const API_VERSION = 'v1';
 const MAX_LIMIT = 200;
 
 export class SlidingLimiter {
-    constructor({ limit, windowMs = 60e3, now = () => Date.now() }) { Object.assign(this, { limit, windowMs, now }); this.hits = new Map(); }
+    constructor({ limit, windowMs = 60e3, now = () => Date.now() }) {
+        Object.assign(this, { limit, windowMs, now }); this.hits = new Map();
+        setInterval(() => sweepHits(this.hits, this.now() - this.windowMs), Math.min(windowMs, 60e3)).unref(); // forget IPs after the window (privacy policy)
+    }
     take(key) {
-        const t = this.now(); const cut = t - this.windowMs;
-        const h = (this.hits.get(key) ?? []).filter((x) => x > cut);
-        if (h.length >= this.limit) { this.hits.set(key, h); return { ok: false, remaining: 0, retryAfter: Math.max(1, Math.ceil((h[0] + this.windowMs - t) / 1000)) }; }
+        const t = this.now(); sweepHits(this.hits, t - this.windowMs);
+        const h = this.hits.get(key) ?? [];
+        if (h.length >= this.limit) return { ok: false, remaining: 0, retryAfter: Math.max(1, Math.ceil((h[0] + this.windowMs - t) / 1000)) };
         h.push(t); this.hits.set(key, h);
-        for (const [k, v] of this.hits) if (!v.some((x) => x > cut)) this.hits.delete(k); // forget IPs after the window (privacy policy)
         return { ok: true, remaining: this.limit - h.length };
     }
 }

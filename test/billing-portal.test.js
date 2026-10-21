@@ -31,6 +31,9 @@ test('billing portal: button only for paid accounts with key, redirects to Strip
         setPlan(dataDir, id, { subscription: 'sub_1' });
         const paid = await (await fetch(`${url}/manage?t=${t}`)).text();
         assert.doesNotMatch(paid, /buy\.stripe\.com/, 'a paid subscription must not start a second one'); assert.match(paid, /Change plan/);
+        setPlan(dataDir, id, { plan: 'free' }); // subscription went unpaid: it can still recover
+        const unpaid = await (await fetch(`${url}/manage?t=${t}`)).text();
+        assert.doesNotMatch(unpaid, /buy\.stripe\.com/, 'no second subscription while one exists'); assert.match(unpaid, /value="billing"/, 'portal to fix the payment');
         // the button posts to /manage (a path nginx already proxies)
         const viaManage = await fetch(`${url}/manage`, { method: 'POST', body: new URLSearchParams({ t, action: 'billing' }), redirect: 'manual' });
         assert.equal(viaManage.status, 303); calls.length = 0;

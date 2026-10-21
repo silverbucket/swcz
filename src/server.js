@@ -46,7 +46,7 @@ export function createServer({
     const links = { starter: env.STRIPE_LINK_STARTER || 'https://buy.stripe.com/test_3cIdR9dpr1vZ5YWbic1ZS00', pro: env.STRIPE_LINK_PRO || 'https://buy.stripe.com/test_bJe28rdprb6z0ECdqk1ZS01', accountant: env.STRIPE_LINK_ACCOUNTANT || ACCOUNTANT_TEST_LINK };
     const handleApi = createApi({ dataDir, env, now, log });
     const stripeKey = env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY;
-    const canBill = (a) => Boolean(stripeKey && a.stripeCustomer && a.plan !== 'free');
+    const canBill = (a) => Boolean(stripeKey && a.stripeCustomer && (a.plan !== 'free' || a.subscription)); // an unpaid subscription is fixed in the portal
     const billingBtn = (a, t) => (canBill(a) ? `<form method="post" action="/manage"><input type="hidden" name="t" value="${esc(t)}"><input type="hidden" name="action" value="billing"><button>Manage billing / cancel · Správa plateb / zrušení</button></form>${a.cancelAt ? `<p><strong>Your plan is set to end on ${esc(new Date(a.cancelAt * 1000).toISOString().slice(0, 10))}, then moves to free. / Tarif skončí ${esc(new Date(a.cancelAt * 1000).toISOString().slice(0, 10))}.</strong></p>` : ''}` : '');
     const portal = stripePortal ?? (async (customer, returnUrl) => {
         const r = await fetch('https://api.stripe.com/v1/billing_portal/sessions', { method: 'POST', headers: { authorization: `Bearer ${stripeKey}`, 'content-type': 'application/x-www-form-urlencoded' },
@@ -71,7 +71,7 @@ export function createServer({
         const opts = ['starter', 'pro', 'accountant'].filter((p) => PLAN_INFO[p].limit > PLAN_INFO[a.plan].limit && links[p]);
         if (!opts.length) return '';
         // A paid subscription changes plan in the Stripe portal; a new Checkout would start a second subscription.
-        if (a.subscription && a.plan !== 'free') return canBill(a) ? `<h2>Upgrade</h2><form method="post" action="/manage">${hidden(t, { action: 'billing' })}<button>Change plan / Změnit tarif</button></form>` : '<h2>Upgrade</h2><p>To change your plan, write to <a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>.</p>';
+        if (a.subscription) return canBill(a) ? `<h2>Upgrade</h2><form method="post" action="/manage">${hidden(t, { action: 'billing' })}<button>Change plan / Změnit tarif</button></form>` : '<h2>Upgrade</h2><p>To change your plan, write to <a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>.</p>';
         const label = { starter: 'Starter: 50 suppliers, 190 Kč / month', pro: 'Pro: 500 suppliers + API, 490 Kč / month', accountant: 'Accountant: 2,000 suppliers, client lists + API, 990 Kč / month' };
         return `<h2>Upgrade</h2><p>${opts.map((p) => `<a class="cta" href="${esc(checkoutUrl(a, p))}">${label[p]}</a>`).join(' ')}</p>`;
     };

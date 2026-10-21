@@ -54,12 +54,17 @@ export function cachedSources(dataDir, { sources = REGISTER_SOURCES, now = () =>
             const subjects = new Map(); let generated = null; const missing = [];
             const use = (dic, v) => { generated = v.generated; if (v.subject) subjects.set(dic, v.subject); };
             for (const dic of dics) { const hit = fresh('dph', dic); if (hit) use(dic, hit.value); else missing.push(dic); }
-            if (missing.length) {
-                try {
-                    const r = await sources.dph(missing);
-                    for (const dic of missing) { const v = { generated: r.generated, subject: r.subjects.get(dic) ?? null }; write('dph', dic, v); use(dic, v); }
-                } catch (e) { for (const dic of missing) use(dic, fallback('dph', dic, e)); }
+            // Share in-flight requests per DIČ (concurrent free checks of the same supplier); batch only the rest.
+            const toFetch = missing.filter((dic) => !inFlight.has(`dph:${dic}`));
+            if (toFetch.length) {
+                const batch = sources.dph(toFetch);
+                for (const dic of toFetch) {
+                    const k = `dph:${dic}`;
+                    inFlight.set(k, batch.then((r) => { const v = { generated: r.generated, subject: r.subjects.get(dic) ?? null }; write('dph', dic, v); return v; }).finally(() => inFlight.delete(k)));
+                }
             }
+            const pending = missing.map((dic) => [dic, inFlight.get(`dph:${dic}`)]);
+            for (const [dic, p] of pending) { try { use(dic, await p); } catch (e) { use(dic, fallback('dph', dic, e)); } }
             return { generated, subjects };
         },
         /**

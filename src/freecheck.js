@@ -9,15 +9,20 @@ import { REGISTER_SOURCES, cachedSources } from './lookups.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+/** Drop timestamps older than `cut` from a key -> [timestamps] map, and keys left with none. */
+export function sweepHits(hits, cut) { for (const [k, v] of hits) { const keep = v.filter((x) => x > cut); if (keep.length) hits.set(k, keep); else hits.delete(k); } }
+
 export class RateLimiter {
-    constructor({ perIp = 5, global = 200, windowMs = 3600e3, now = () => Date.now() } = {}) { Object.assign(this, { perIp, global, windowMs, now }); this.hits = new Map(); this.all = []; }
+    constructor({ perIp = 5, global = 200, windowMs = 3600e3, now = () => Date.now() } = {}) {
+        Object.assign(this, { perIp, global, windowMs, now }); this.hits = new Map(); this.all = [];
+        setInterval(() => this.sweep(), Math.min(windowMs, 60e3)).unref(); // privacy policy: IPs go after one window, traffic or not
+    }
+    sweep() { const cut = this.now() - this.windowMs; this.all = this.all.filter((x) => x > cut); sweepHits(this.hits, cut); }
     allow(ip) {
-        const t = this.now(); const cut = t - this.windowMs;
-        this.all = this.all.filter((x) => x > cut);
-        const mine = (this.hits.get(ip) ?? []).filter((x) => x > cut);
-        if (mine.length >= this.perIp || this.all.length >= this.global) { this.hits.set(ip, mine); return false; }
-        mine.push(t); this.hits.set(ip, mine); this.all.push(t);
-        for (const [k, v] of this.hits) if (!v.some((x) => x > cut)) this.hits.delete(k); // privacy policy: IPs kept at most one window
+        this.sweep();
+        const mine = this.hits.get(ip) ?? [];
+        if (mine.length >= this.perIp || this.all.length >= this.global) return false; // a refused IP is not stored
+        mine.push(this.now()); this.hits.set(ip, mine); this.all.push(this.now());
         return true;
     }
 }

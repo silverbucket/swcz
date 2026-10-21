@@ -6,15 +6,18 @@ import { buildReport } from './report.js';
 import { recordFor, appendHistory } from './history.js';
 import { normaliseIco } from './ico.js';
 
-export async function runWatchlist(items, { name, statePath, outDir, isirEnabled = true, coi, skip = {}, log = () => {}, check = checkWatchlist, history, now = () => Date.now(), deferState = false }) {
+export async function runWatchlist(items, { name, statePath, outDir, isirEnabled = true, coi, skip = {}, log = () => {}, check = checkWatchlist, history, now = () => Date.now(), deferState = false, saved }) {
     // history: { dataDir, accountId, list, client } -> append one record per supplier to the check history.
+    // saved: every supplier saved on the list (default: items). Suppliers over the plan limit aren't checked but keep
+    // their snapshot, so an upgrade compares against it again.
     // deferState: today's results (latest, for the API) are stored at once, but the comparison baseline (facts) only
     // when the caller calls saveState() once the alert email is out, so a mail failure re-detects the change tomorrow.
     const prev = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, 'utf8')) : { facts: {} };
     const firstRun = Object.keys(prev.facts).length === 0;
     const res = await check(items.map((i) => ({ ...i, dic: prev.facts[normaliseIco(i.ico)]?.dic })), { isirEnabled, coi, skip, log });
     // Only suppliers still on the list: register data of a removed supplier is deleted with it (privacy policy).
-    const kept = Object.fromEntries(Object.entries(prev.facts).filter(([k]) => items.some((i) => normaliseIco(i.ico) === k)));
+    const onList = new Set((saved ?? items.map((i) => i.ico)).map(normaliseIco));
+    const kept = Object.fromEntries(Object.entries(prev.facts).filter(([k]) => onList.has(k)));
     const nextFacts = { ...kept };
     const reportItems = res.rows.map((r) => {
         const f = facts(r);
@@ -35,7 +38,7 @@ export async function runWatchlist(items, { name, statePath, outDir, isirEnabled
     const records = reportItems.map((i) => recordFor(i, { at, list: history?.list ?? 'main', client: history?.client ?? null, isirEnabled, coiRun }));
     const latest = { ...(prev.latest ?? {}) };
     for (const r of records) latest[r.ico] = r;
-    for (const k of Object.keys(latest)) if (!items.some((i) => String(i.ico).padStart(8, '0') === k)) delete latest[k];
+    for (const k of Object.keys(latest)) if (!onList.has(k)) delete latest[k];
     const write = (baseline) => {
         fs.mkdirSync(path.dirname(statePath), { recursive: true });
         fs.writeFileSync(`${statePath}.tmp`, JSON.stringify({ updatedAt: at, facts: baseline, latest }, null, 1)); fs.renameSync(`${statePath}.tmp`, statePath);

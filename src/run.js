@@ -60,7 +60,7 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
             const items = l.icos.map((ico) => ({ ico, label: null, expectedAccount: null, website: l.websites?.[ico] ?? null }));
             const name = l.clientId ? `${a.id}--${l.clientId}` : a.id;
             try {
-                const r = await runWatchlist(items, { name, statePath: path.join(dataDir, 'state', `${name}.json`), outDir: path.join(dataDir, 'reports'), isirEnabled, log, check: doCheck, skip, now, deferState: true,
+                const r = await runWatchlist(items, { name, statePath: path.join(dataDir, 'state', `${name}.json`), outDir: path.join(dataDir, 'reports'), isirEnabled, log, check: doCheck, skip, now, deferState: true, saved: l.clientId ? a.clients.find((c) => c.id === l.clientId).icos : a.icos,
                     coi: coiEnabled && items.some((i) => i.website) ? await getCoi() : undefined, history: { dataDir, accountId: a.id, list: l.key, client: l.name } });
                 summary.checked++;
                 // Re-read right before every email: an unsubscribe (owner or recipient), a removed recipient or a deletion
