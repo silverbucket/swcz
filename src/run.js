@@ -5,12 +5,20 @@ import path from 'node:path';
 import { Accounts } from './accounts.js';
 import { createMailer } from './mailer.js';
 import { runWatchlist } from './runner.js';
+import { checkWatchlist } from './check.js';
+import { getSubject, getVr } from './sources/ares.js';
+import { getStatuses } from './sources/dph.js';
+import { getByIco } from './sources/isir.js';
 import { loadCoiList } from './sources/coi.js';
 import { runCanary, skipFrom } from './canary.js';
 import { pruneHistory, DEFAULT_HISTORY_MONTHS } from './history.js';
 import { sendMonthlyReports } from './monthly.js';
 
-export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'data', mailer = createMailer(env), check, log = console.error, isirEnabled = env.ISIR_DISABLED !== '1', coiEnabled = env.COI_DISABLED !== '1', loadCoi = loadCoiList, canary = check ? null : runCanary, now = () => Date.now() } = {}) {
+export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'data', mailer = createMailer(env), check, log = console.error, isirEnabled = env.ISIR_DISABLED !== '1', coiEnabled = env.COI_DISABLED !== '1', loadCoi = loadCoiList, canary = check ? null : runCanary, now = () => Date.now(), sources = { ares: getSubject, vr: getVr, dph: getStatuses, isir: getByIco } } = {}) {
+    // One lookup per IČO per run, shared by every list that watches it (ISIR allows 3,000 calls a day). DPH is batched already.
+    const once = (fn) => { const m = new Map(); return (k) => { if (!m.has(k)) m.set(k, fn(k)); return m.get(k); }; };
+    const shared = { ares: once(sources.ares), vr: once(sources.vr), dph: sources.dph, isir: once(sources.isir) };
+    const doCheck = check ?? ((items, o) => checkWatchlist(items, { ...o, sources: shared }));
     const baseUrl = (env.BASE_URL || 'https://supplierwatch.cz').replace(/\/$/, '');
     const acc = new Accounts(path.join(dataDir, 'accounts.json'));
     const summary = { checked: 0, emailed: 0, failed: 0, sourcesFailed: [], reports: 0 };
@@ -28,13 +36,14 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
             const items = l.icos.map((ico) => ({ ico, label: null, expectedAccount: null, website: l.websites?.[ico] ?? null }));
             const name = l.clientId ? `${a.id}--${l.clientId}` : a.id;
             try {
-                const r = await runWatchlist(items, { name, statePath: path.join(dataDir, 'state', `${name}.json`), outDir: path.join(dataDir, 'reports'), isirEnabled, log, check, skip, now, deferState: true,
+                const r = await runWatchlist(items, { name, statePath: path.join(dataDir, 'state', `${name}.json`), outDir: path.join(dataDir, 'reports'), isirEnabled, log, check: doCheck, skip, now, deferState: true,
                     coi: coiEnabled && items.some((i) => i.website) ? await getCoi() : undefined, history: { dataDir, accountId: a.id, list: l.key, client: l.name } });
                 summary.checked++;
-                if (r.changed && !r.firstRun) {
+                if ((r.changed && !r.firstRun) || r.newAlerts) {
                     const head = l.name ? `Client / Klient: ${l.name}\n\n` : '';
-                    await mailer.send({ to: a.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${a.unsubToken}`, subject: `Supplier Watch: changes detected${l.name ? ` (${l.name})` : ''} / Zjištěny změny`, text: `${head}${r.text}\n\nEdit your list: ${baseUrl}/#manage` });
-                    for (const rc of l.recipients) await mailer.send({ to: rc.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${rc.unsubToken}`, subject: `Supplier Watch: changes detected (${l.name}) / Zjištěny změny`, text: `${head}${r.text}\n\nThese alerts were set up for you by ${a.email}.` });
+                    const what = r.changed && !r.firstRun ? ['changes detected', 'Zjištěny změny'] : ['warnings found', 'Nalezena upozornění'];
+                    await mailer.send({ to: a.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${a.unsubToken}`, subject: `Supplier Watch: ${what[0]}${l.name ? ` (${l.name})` : ''} / ${what[1]}`, text: `${head}${r.text}\n\nEdit your list: ${baseUrl}/#manage` });
+                    for (const rc of l.recipients) await mailer.send({ to: rc.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${rc.unsubToken}`, subject: `Supplier Watch: ${what[0]} (${l.name}) / ${what[1]}`, text: `${head}${r.text}\n\nThese alerts were set up for you by ${a.email}.` });
                     summary.emailed++;
                 }
                 r.saveState(); // only after the alert went out (a throw above leaves yesterday's state, so it re-alerts)
@@ -43,6 +52,7 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
     }
     try { summary.reports = await sendMonthlyReports({ dataDir, acc, mailer, baseUrl, now: new Date(now()), log }); } catch (e) { log(`monthly reports: ${e.message}`); }
     acc.save();
+    try { const n = acc.purgeUnconfirmed(); if (n) log(`purged ${n} unconfirmed sign-ups`); } catch (e) { log(`purge: ${e.message}`); }
     try { const n = pruneHistory(dataDir, Number(env.HISTORY_MONTHS || DEFAULT_HISTORY_MONTHS), new Date(now())); if (n) log(`pruned ${n} old history/report files`); } catch (e) { log(`prune: ${e.message}`); }
     return summary;
 }

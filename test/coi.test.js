@@ -129,7 +129,7 @@ test('signup/manage forms accept and show websites', async () => {
         assert.match(home, /Zdroj: Česká obchodní inspekce/); assert.match(home, /licence-otevrenych-dat/);
         await fetch(`${url}/signup`, { method: 'POST', body: new URLSearchParams({ email: 'w@x.cz', icos: '27082440 https://www.firma.cz/', consent: 'yes' }) });
         const ct = sent[0].text.match(/confirm\?t=([\w-]+)/)[1];
-        const html = await (await fetch(`${url}/confirm?t=${ct}`)).text();
+        const html = await (await fetch(`${url}/confirm`, { method: 'POST', body: new URLSearchParams({ t: ct }) })).text();
         assert.match(html, /27082440 firma\.cz/);
         const mt = html.match(/name="t" value="([\w-]+)"/)[1];
         await fetch(`${url}/manage`, { method: 'POST', body: new URLSearchParams({ t: mt, icos: '27082440 shop.cz' }) });

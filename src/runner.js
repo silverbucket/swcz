@@ -49,5 +49,8 @@ export async function runWatchlist(items, { name, statePath, outDir, isirEnabled
         fs.writeFileSync(path.join(outDir, `${name}-${stamp}.txt`), text);
     }
     const changed = reportItems.some((i) => i.changes.length);
-    return { result, text, firstRun, changed, records, saveState };
+    // A supplier new to the list that already has a warning (e.g. unreliable payer) is reported once; it has no "change".
+    // shortcut: a supplier whose first check hit an outage gets a baseline without alerts, so it is not reported later.
+    const newAlerts = reportItems.some((i) => !prev.facts[i.ico] && i.alerts.length);
+    return { result, text, firstRun, changed, newAlerts, records, saveState };
 }

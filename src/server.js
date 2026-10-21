@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Supplier Watch web app. Listens on 127.0.0.1 behind the web server and serves:
-//   static site, /terms.html, /privacy.html, POST /signup, GET /confirm, POST /manage-link,
+//   static site, /terms.html, /privacy.html, POST /signup, GET+POST /confirm, POST /manage-link,
 //   GET+POST /check (free one-off check), GET+POST /manage, GET+POST /unsubscribe, POST /stripe/webhook, GET /healthz
 import http from 'node:http';
 import fs from 'node:fs';
@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { verifySignature } from './billing.js';
 import { Accounts, PLANS, parseSupplierForm, validEmail, normEmail, suppliersText } from './accounts.js';
 import { createMailer } from './mailer.js';
-import { createFreeCheck, checkPageHtml } from './freecheck.js';
+import { createFreeCheck, checkPageHtml, RateLimiter, clientIp } from './freecheck.js';
 import { createApi } from './api.js';
 import { PLAN_INFO } from './plans.js';
 import { historyMonths, validMonth } from './history.js';
@@ -54,15 +54,24 @@ export function createServer({
         const j = await r.json(); if (!r.ok || !j.url) throw new Error(j.error?.message ?? `stripe ${r.status}`); return j.url;
     });
     const lastMail = new Map(); // email -> ms, simple anti-abuse cooldown
-    const cooldown = (kind, email) => { const k = `${kind}:${email}`; const t = lastMail.get(k); if (t && now() - t < 60e3) return true; lastMail.set(k, now()); return false; };
+    const cooldown = (kind, email) => {
+        const k = `${kind}:${email}`; const t = lastMail.get(k); if (t && now() - t < 60e3) return true;
+        if (lastMail.size > 10000) for (const [x, at] of lastMail) if (now() - at >= 60e3) lastMail.delete(x);
+        lastMail.set(k, now()); return false;
+    };
+    // Sign-up and manage-link requests send email to any address: cap them per IP, and globally to protect the mail quota.
+    const mailLimit = new RateLimiter({ perIp: Number(env.MAIL_FORM_PER_IP || 10), global: Number(env.MAIL_FORM_GLOBAL || 300), now });
+    const tooMany = (send) => send(429, page('Too many requests', '<p>Too many requests from your network. Please try again in an hour. / Příliš mnoho požadavků, zkuste to prosím za hodinu.</p>'));
     const unsubUrl = (a) => `${baseUrl}/unsubscribe?t=${a.unsubToken}`;
     const checkoutUrl = (a, plan) => `${links[plan]}?client_reference_id=${encodeURIComponent(a.id)}&prefilled_email=${encodeURIComponent(a.email)}`;
     const SCRIPTS = '<script src="/csvimport.js"></script><script src="/suppliers.js"></script>';
     const hidden = (t, extra = {}) => `<input type="hidden" name="t" value="${esc(t)}">${Object.entries(extra).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('')}`;
     const mlink = (t, params = {}) => `/manage?${new URLSearchParams({ t, ...params })}`;
-    const upgradeHtml = (a) => {
+    const upgradeHtml = (a, t) => {
         const opts = ['starter', 'pro', 'accountant'].filter((p) => PLAN_INFO[p].limit > PLAN_INFO[a.plan].limit && links[p]);
         if (!opts.length) return '';
+        // A paid subscription changes plan in the Stripe portal; a new Checkout would start a second subscription.
+        if (a.subscription && a.plan !== 'free') return canBill(a) ? `<h2>Upgrade</h2><form method="post" action="/manage">${hidden(t, { action: 'billing' })}<button>Change plan / Změnit tarif</button></form>` : '<h2>Upgrade</h2><p>To change your plan, write to <a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>.</p>';
         const label = { starter: 'Starter: 50 suppliers, 190 Kč / month', pro: 'Pro: 500 suppliers + API, 490 Kč / month', accountant: 'Accountant: 2,000 suppliers, client lists + API, 990 Kč / month' };
         return `<h2>Upgrade</h2><p>${opts.map((p) => `<a class="cta" href="${esc(checkoutUrl(a, p))}">${label[p]}</a>`).join(' ')}</p>`;
     };
@@ -98,7 +107,7 @@ ${a.unsubscribed ? '<label><input type="checkbox" name="resubscribe" value="1"> 
 ${clientsHtml(acc, a, t)}
 ${reportsHtml(a, t)}
 ${keysHtml(a, t, newKey)}
-${upgradeHtml(a)}
+${upgradeHtml(a, t)}
 ${billingBtn(a, t)}<p class="muted">You can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.<br>Tarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.</p>`);
     };
     const clientHtml = (acc, a, c, t, note = '') => {
@@ -145,6 +154,7 @@ ${reportsHtml(a, t, c.id)}
             if (!validEmail(email)) return send(400, page('Error', '<p>Please enter a valid email. / Zadejte platný e-mail.</p><p><a href="/#signup">Back</a></p>'));
             if (f.consent !== 'yes') return send(400, page('Error', '<p>Please tick the consent box. / Zaškrtněte prosím souhlas.</p><p><a href="/#signup">Back</a></p>'));
             if (f.fax) return send(200, page('Check your email', '<p>Check your email.</p>')); // honeypot
+            if (!mailLimit.allow(clientIp(req))) return tooMany(send);
             const { icos, websites, invalid } = parseSupplierForm(new URLSearchParams(body));
             if (!icos.length) return send(400, page('Error', `<p>No valid IČO found. / Nenalezeno žádné platné IČO.${invalid.length ? ` Invalid: ${esc(invalid.join(', '))}` : ''}</p><p><a href="/#signup">Back</a></p>`));
             const acc = new Accounts(accFile, { now });
@@ -157,8 +167,10 @@ ${reportsHtml(a, t, c.id)}
             return send(200, page('Check your email', `<h1>Check your email / Zkontrolujte e-mail</h1><p>We sent a confirmation link to ${esc(email)}.</p>${capped}${invalid.length ? `<p>Ignored invalid IČO: ${esc(invalid.join(', '))}</p>` : ''}`));
         }
 
-        if (req.method === 'GET' && P === '/confirm') {
-            const acc = new Accounts(accFile, { now }); const a = acc.confirm(url.searchParams.get('t'));
+        if (P === '/confirm') { // GET shows a button: mail link scanners must not use up the single-use link
+            const t = url.searchParams.get('t') || form().t;
+            if (req.method === 'GET') return send(200, page('Confirm your email', `<h1>Confirm your email / Potvrďte e-mail</h1><form method="post" action="/confirm">${hidden(t)}<button>Confirm and start daily checks / Potvrdit</button></form>`));
+            const acc = new Accounts(accFile, { now }); const a = acc.confirm(t);
             if (!a) return send(400, page('Link expired', '<p>This link is invalid or expired. Sign up again on the <a href="/#signup">home page</a>.</p>'));
             const mt = acc.issue(a.id, 'manage'); acc.save();
             return send(200, manageHtml(acc, a, mt, '<p><strong>Email confirmed. Daily checks start tomorrow at 06:30 Prague time. / E-mail potvrzen.</strong></p>'));
@@ -174,6 +186,7 @@ ${reportsHtml(a, t, c.id)}
         }
 
         if (req.method === 'POST' && P === '/manage-link') {
+            if (!mailLimit.allow(clientIp(req))) return tooMany(send);
             const email = normEmail(form().email); const acc = new Accounts(accFile, { now }); const a = acc.byEmail(email);
             if (a?.confirmed && !cooldown("manage", email)) {
                 const t = acc.issue(a.id, 'manage'); acc.save();

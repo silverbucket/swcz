@@ -85,3 +85,13 @@ test('Stripe webhook upgrades to Accountant via metadata', async () => {
         assert.equal(accounts(dataDir).get(a.id).plan, 'accountant');
     } finally { srv.close(); }
 });
+
+test('Stripe: events of another subscription do not change the plan; paid accounts upgrade in the portal, not a new Checkout', async () => {
+    const acc = accounts(tmp('swsub-'));
+    const { account: a } = acc.signup('s@x.cz', [], { consentText: 'c' });
+    acc.applyStripe({ type: 'checkout.session.completed', data: { object: { client_reference_id: a.id, customer: 'cus_1', subscription: 'sub_new', metadata: { plan: 'pro' } } } });
+    acc.applyStripe({ type: 'customer.subscription.deleted', data: { object: { id: 'sub_old', customer: 'cus_1' } } }); assert.equal(a.plan, 'pro');
+    acc.applyStripe({ type: 'customer.subscription.updated', data: { object: { id: 'sub_old', customer: 'cus_1', status: 'active', metadata: { plan: 'starter' } } } }); assert.equal(a.plan, 'pro');
+    acc.applyStripe({ type: 'customer.subscription.deleted', data: { object: { id: 'sub_new', customer: 'cus_1' } } }); assert.equal(a.plan, 'free');
+    acc.applyStripe({ type: 'checkout.session.completed', data: { object: { client_reference_id: a.id, customer: 'cus_1', subscription: 'sub_2', amount_subtotal: 99000 } } }); assert.equal(a.plan, 'accountant');
+});

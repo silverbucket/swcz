@@ -50,9 +50,10 @@ test('signup -> double opt-in -> manage -> Stripe upgrade -> unsubscribe', async
         assert.equal((await runAll({ dataDir, mailer: { send: async () => assert.fail('mail') }, check: async () => assert.fail('check'), log: () => {} })).checked, 0);
         // confirm (single use)
         const ct = linkIn(sent[0], '/confirm');
-        const c = await fetch(`${url}/confirm?t=${ct}`); assert.equal(c.status, 200);
+        assert.match(await (await fetch(`${url}/confirm?t=${ct}`)).text(), /method="post" action="\/confirm"/); // GET (link scanners) only shows a button
+        const c = await post(`${url}/confirm`, { t: ct }); assert.equal(c.status, 200);
         const html = await c.text(); assert.match(html, /client_reference_id=acc_/); assert.match(html, /prefilled_email=a%40firma.cz/);
-        assert.equal((await fetch(`${url}/confirm?t=${ct}`)).status, 400);
+        assert.equal((await post(`${url}/confirm`, { t: ct })).status, 400);
         const mt = html.match(/name="t" value="([\w-]+)"/)[1];
         // free plan: editing to 7 keeps 5
         let m = await post(`${url}/manage`, { t: mt, icos: VALID.join(',') });
@@ -147,4 +148,35 @@ test('accounts.json is imported into SQLite once and kept as .migrated', () => {
     assert.equal(acc.byEmail('old@x.cz').plan, 'pro'); assert.equal(acc.use('tok', 'manage').id, 'acc_1');
     assert.ok(!fs.existsSync(file)); assert.ok(fs.existsSync(`${file}.migrated`));
     assert.equal(new Accounts(file).all().length, 1);
+});
+
+test('daily run: an IČO on several lists is looked up once; a new supplier with a warning is emailed once', async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swrun-'));
+    const acc = new Accounts(path.join(dataDir, 'accounts.json'));
+    for (const e of ['p@x.cz', 'q@x.cz']) { const { confirmToken } = acc.signup(e, ['27082440'], { consentText: 'x' }); acc.confirm(confirmToken); }
+    acc.save();
+    const calls = { ares: 0, isir: 0 };
+    const sources = {
+        ares: async () => { calls.ares++; return { found: true, name: 'X a.s.', dic: 'CZ27082440' }; }, vr: async () => null,
+        dph: async (dics) => ({ subjects: new Map(dics.map((d) => [d, { subjectType: 'PLATCE_DPH', unreliable: 'ANO', accounts: [] }])) }),
+        isir: async () => { calls.isir++; return { cases: [] }; },
+    };
+    const sent = []; const mailer = { send: async (m) => sent.push(m) };
+    await runAll({ dataDir, mailer, sources, canary: null, log: () => {} });
+    assert.deepEqual(calls, { ares: 1, isir: 1 });
+    assert.equal(sent.length, 2); assert.match(sent[0].subject, /warnings found/); assert.match(sent[0].text, /UNRELIABLE VAT PAYER/);
+    await runAll({ dataDir, mailer, sources, canary: null, log: () => {} }); assert.equal(sent.length, 2, 'not repeated');
+});
+
+test('sign-up: link scanners cannot confirm, too many sign-ups per IP are refused, stale unconfirmed sign-ups are purged', async () => {
+    const { dataDir, sent, srv } = setup(); const url = await listen(srv);
+    try {
+        for (let i = 0; i < 10; i++) assert.equal((await post(`${url}/signup`, { email: `s${i}@x.cz`, icos: '27082440', consent: 'yes' })).status, 200);
+        assert.equal((await post(`${url}/signup`, { email: 's10@x.cz', icos: '27082440', consent: 'yes' })).status, 429);
+        assert.equal((await post(`${url}/signup`, { email: 's11@x.cz', icos: '27082440', consent: 'yes' }, { 'x-forwarded-for': '8.8.8.8' })).status, 200);
+        await fetch(`${url}/confirm?t=${linkIn(sent[0], '/confirm')}`);
+        assert.equal(new Accounts(path.join(dataDir, 'accounts.json')).byEmail('s0@x.cz').confirmed, false);
+    } finally { srv.close(); }
+    const later = new Accounts(path.join(dataDir, 'accounts.json'), { now: () => Date.now() + 8 * 864e5 });
+    assert.equal(later.purgeUnconfirmed(), 11); assert.equal(new Accounts(path.join(dataDir, 'accounts.json')).all().length, 0);
 });

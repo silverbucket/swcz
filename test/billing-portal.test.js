@@ -27,6 +27,10 @@ test('billing portal: button only for paid accounts with key, redirects to Strip
         assert.equal((await fetch(`${url}/billing`, { method: 'POST', body: new URLSearchParams({ t }), redirect: 'manual' })).status, 400);
         setPlan(dataDir, id, { plan: 'starter', stripeCustomer: 'cus_1' });
         assert.match(await (await fetch(`${url}/manage?t=${t}`)).text(), /name="action" value="billing"/);
+        assert.match(await (await fetch(`${url}/manage?t=${t}`)).text(), /buy\.stripe\.com/, 'no subscription recorded yet: Checkout links');
+        setPlan(dataDir, id, { subscription: 'sub_1' });
+        const paid = await (await fetch(`${url}/manage?t=${t}`)).text();
+        assert.doesNotMatch(paid, /buy\.stripe\.com/, 'a paid subscription must not start a second one'); assert.match(paid, /Change plan/);
         // the button posts to /manage (a path nginx already proxies)
         const viaManage = await fetch(`${url}/manage`, { method: 'POST', body: new URLSearchParams({ t, action: 'billing' }), redirect: 'manual' });
         assert.equal(viaManage.status, 303); calls.length = 0;

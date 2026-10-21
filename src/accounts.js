@@ -129,6 +129,17 @@ export class Accounts {
         });
         for (const a of changed) this.snap.set(a.id, JSON.stringify(a));
     }
+    /** Delete sign-ups never confirmed within `days` of their last sign-up attempt (written immediately). Returns the count. */
+    purgeUnconfirmed(days = 7) {
+        const cut = new Date(this.now() - days * 864e5).toISOString();
+        const ids = tx(this.sql, () => {
+            const gone = this.sql.prepare("DELETE FROM accounts WHERE json_extract(data, '$.confirmed') = 0 AND coalesce(json_extract(data, '$.pendingConsent.at'), json_extract(data, '$.createdAt')) < ? RETURNING id").all(cut).map((r) => r.id);
+            for (const id of gone) this.sql.prepare('DELETE FROM tokens WHERE account_id = ?').run(id);
+            return gone;
+        });
+        for (const id of ids) { delete this.db.accounts[id]; this.snap.delete(id); }
+        return ids.length;
+    }
     get(id) { return this.db.accounts[id] ?? null; }
     byEmail(email) { const e = normEmail(email); return Object.values(this.db.accounts).find((a) => a.email === e) ?? null; }
     byStripeCustomer(cus) { return Object.values(this.db.accounts).find((a) => a.stripeCustomer === cus) ?? null; }
@@ -240,11 +251,13 @@ export class Accounts {
         if (ev.type === 'checkout.session.completed') {
             const a = (o.client_reference_id && this.get(o.client_reference_id)) || this.byEmail(o.customer_details?.email ?? o.customer_email);
             if (!a) return null;
-            a.plan = meta(o.metadata) ?? 'starter'; a.stripeCustomer = o.customer ?? a.stripeCustomer; a.subscription = o.subscription ?? null;
-            return `${a.id} -> ${a.plan}`;
+            const replaced = a.subscription && o.subscription && a.subscription !== o.subscription ? a.subscription : null;
+            a.plan = meta(o.metadata) ?? PLAN_BY_AMOUNT[o.amount_subtotal] ?? 'starter'; a.stripeCustomer = o.customer ?? a.stripeCustomer; a.subscription = o.subscription ?? null;
+            return `${a.id} -> ${a.plan}${replaced ? ` (WARNING: previous subscription ${replaced} may still be billing)` : ''}`;
         }
         if (ev.type === 'customer.subscription.updated' || ev.type === 'customer.subscription.deleted') {
             const a = this.byStripeCustomer(o.customer); if (!a) return null;
+            if (a.subscription && o.id && o.id !== a.subscription) return null; // an old/other subscription must not change the plan
             const active = ev.type === 'customer.subscription.updated' && ['active', 'trialing', 'past_due'].includes(o.status);
             const price = o.items?.data?.[0]?.price;
             a.plan = active ? (meta(o.metadata) ?? meta(price?.metadata) ?? PLAN_BY_AMOUNT[price?.unit_amount] ?? a.plan) : 'free';
