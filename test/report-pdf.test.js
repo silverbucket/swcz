@@ -96,6 +96,10 @@ test('history retention: files older than HISTORY_MONTHS full months are deleted
     const n = pruneHistory(dataDir, 24, new Date('2026-10-21T10:00:00Z'));
     assert.equal(n, 2); assert.deepEqual(fs.readdirSync(d).sort(), ['2024-10.jsonl', '2025-06.jsonl', '2026-10.jsonl']); assert.deepEqual(fs.readdirSync(m), ['2024-10-cl_1.pdf']);
     assert.equal(pragueMonth(new Date('2026-09-30T22:30:00Z')), '2026-10', 'months are in Prague time');
+    const r = path.join(dataDir, 'reports'); fs.mkdirSync(r);
+    for (const f of ['acc_1-2026-09-20.json', 'acc_1-2026-09-20.txt', 'acc_1--cl_1-2026-09-21.txt', 'acc_1-2026-10-20.json']) fs.writeFileSync(path.join(r, f), 'x');
+    assert.equal(pruneHistory(dataDir, 24, new Date('2026-10-21T10:00:00Z')), 2, 'daily report files are kept 30 days');
+    assert.deepEqual(fs.readdirSync(r).sort(), ['acc_1--cl_1-2026-09-21.txt', 'acc_1-2026-10-20.json']);
 });
 
 test('mailer: attachments are passed through and stored in the dry-run outbox', async () => {

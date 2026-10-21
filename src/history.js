@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const DEFAULT_HISTORY_MONTHS = 24;
+export const REPORT_DAYS = 30; // data/reports/: a debugging copy of each daily run's results
 export const SOURCES = ['ares', 'vat', 'accounts', 'isir', 'coi'];
 
 /** "YYYY-MM" of a date in Europe/Prague. */
@@ -59,7 +60,7 @@ export function historyMonths(dataDir, accountId) {
     const d = dirFor(dataDir, accountId); if (!fs.existsSync(d)) return [];
     return fs.readdirSync(d).map((f) => f.match(/^(\d{4}-\d{2})\.jsonl$/)?.[1]).filter(Boolean).sort().reverse();
 }
-/** Delete history (and stored PDF reports) older than `months` full months. Returns files removed. */
+/** Delete history (and stored PDF reports) older than `months` full months, and daily report files older than REPORT_DAYS. Returns files removed. */
 export function pruneHistory(dataDir, months = DEFAULT_HISTORY_MONTHS, now = new Date()) {
     let cut = pragueMonth(now); for (let i = 0; i < months; i++) cut = prevMonth(cut);
     let n = 0;
@@ -69,6 +70,11 @@ export function pruneHistory(dataDir, months = DEFAULT_HISTORY_MONTHS, now = new
             const m = f.match(/^(\d{4}-\d{2})\./)?.[1];
             if (m && m < cut) { fs.rmSync(path.join(root, acc, f)); n++; }
         }
+    }
+    const reports = path.join(dataDir, 'reports'); const cutDay = new Date(now.getTime() - REPORT_DAYS * 864e5).toISOString().slice(0, 10);
+    if (fs.existsSync(reports)) for (const f of fs.readdirSync(reports)) { // <list>-YYYY-MM-DD.json / .txt
+        const day = f.match(/-(\d{4}-\d{2}-\d{2})\.(json|txt)$/)?.[1];
+        if (day && day < cutDay) { fs.rmSync(path.join(reports, f)); n++; }
     }
     return n;
 }
