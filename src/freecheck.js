@@ -49,12 +49,16 @@ const ALERT_TEXT = {
 export function checkPageHtml(page) { return page('Check a Czech supplier by IČO', checkForm()); }
 
 export function checkForm({ ico = '', web = '', error = '' } = {}) {
-    return `<h1>Check one Czech supplier / Ověřit dodavatele</h1>
-<p>Free one-off check of a Czech company by IČO in the official registers: ARES (business register), the VAT register (unreliable payer status and published bank accounts), the insolvency register ISIR and, if you enter a website, the ČOI list of risky e-shops. No account needed.</p>
+    return `<h1>Check a Czech supplier for free</h1>
+<p class="lead">Enter a company ID (IČO) and see what the official registers say about it today. No account needed. / Ověřte dodavatele podle IČO v oficiálních registrech, zdarma a bez registrace.</p>
 ${error ? `<p class="sw-err" role="alert">${esc(error)}</p>` : ''}
-<form method="post" action="/manage-link?freecheck=1"><div class="sw-row"><input name="ico" inputmode="numeric" maxlength="10" required placeholder="IČO (8 digits)" aria-label="IČO" value="${esc(ico)}"><input name="web" placeholder="website (optional), e.g. firma.cz" aria-label="Website (optional)" value="${esc(web)}"></div>
-<p style="display:none"><label>Fax <input name="fax" tabindex="-1" autocomplete="off"></label></p><button>Check / Ověřit</button></form>
-<p class="muted">Limited to a few checks per hour. Results come straight from the public registers at the moment you check; they are information, not legal or tax advice.</p>`;
+<form class="panel" method="post" action="/manage-link?freecheck=1">
+<div class="sw-row"><div style="flex:0 0 11em"><label for="ico">IČO</label><input id="ico" name="ico" inputmode="numeric" maxlength="10" required placeholder="8 digits" value="${esc(ico)}" style="width:100%"></div>
+<div style="flex:1 1 0;min-width:0"><label for="web">Website <span class="muted">(optional)</span></label><input id="web" name="web" placeholder="e.g. firma.cz" value="${esc(web)}" style="width:100%"></div></div>
+<p class="hint">Add the supplier's website to check it against the ČOI list of risky e-shops.</p>
+<p style="display:none"><label>Fax <input name="fax" tabindex="-1" autocomplete="off"></label></p><button>Check supplier / Ověřit</button></form>
+<ul class="chips"><li>Unreliable VAT payer</li><li>Published bank accounts</li><li>Insolvency (ISIR)</li><li>ARES business register</li><li>ČOI risky e-shops</li></ul>
+<p class="muted">A few checks per hour per visitor. Results come straight from the public registers when you check; they are information, not legal or tax advice.</p>`;
 }
 
 /** ok: every register answered; stale: a register is down, older answers shown; partial: some answered; error: none did. */
@@ -78,13 +82,13 @@ export function renderResult(r, { coiUsed, stale = false, monitoring = true }) {
     if (r.website) rows.push([`ČOI risky e-shops (${esc(r.website)})`, r.coi ? (r.coi.matches.length ? `<strong>LISTED</strong>: ${r.coi.matches.map((m) => esc(`${m.domain}${m.reason ? ` - ${m.reason}` : ''}`)).join('<br>')}` : 'not listed') : 'list unavailable today']);
     const errs = r.sourceErrors.length ? `<p class="muted">Some registers did not answer: ${esc(r.sourceErrors.join('; '))}. Try again later.</p>` : '';
     return `<h1 data-result="${resultStatus(r, stale)}">${esc(a.name ?? r.ico)} · IČO ${esc(r.ico)}</h1>
-${alerts.length ? `<p class="sw-err"><strong>Warnings:</strong><br>${alerts.map((x) => esc(ALERT_TEXT[x] ?? x)).join('<br>')}</p>` : '<p><strong>No warnings found in the checked registers today.</strong></p>'}
-<table>${rows.map(([k, val]) => `<tr><th style="text-align:left;vertical-align:top;padding:.2rem 1rem .2rem 0">${k}</th><td>${val}</td></tr>`).join('')}</table>${errs}
+${alerts.length ? `<div class="verdict bad"><strong>Warnings</strong><ul>${alerts.map((x) => `<li>${esc(ALERT_TEXT[x] ?? x)}</li>`).join('')}</ul></div>` : '<div class="verdict ok"><strong>No warnings</strong> in the checked registers today.</div>'}
+<table>${rows.map(([k, val]) => `<tr><th>${k}</th><td>${val}</td></tr>`).join('')}</table>${errs}
 ${stale ? `<p class="sw-err">A register did not answer just now, so this shows the last answer we have, from ${esc(new Date(r.checkedAt).toISOString().slice(0, 10))}. It may be out of date; check again later. / Registr právě neodpovídá, zobrazujeme poslední známá data, mohou být zastaralá.</p>` : ''}
 <p class="muted">Register data from ${esc(new Date(r.checkedAt).toISOString().slice(0, 16).replace('T', ' '))} UTC. Sources: ARES, Financial Administration VAT register, ISIR${coiUsed ? `, <a href="${COI_LICENCE_URL}">${COI_CREDIT}</a> (Supplier Watch is not affiliated with or endorsed by ČOI)` : ''}. Information only, not legal or tax advice.</p>
-<div data-track-content data-content-name="Free check: watch CTA">${monitoring ? `<h2>Get an email when this changes</h2>
+<div class="box" data-track-content data-content-name="Free check: watch CTA">${monitoring ? `<h2 style="margin-top:0">Get an email when this changes</h2>
 <p>A supplier can become an unreliable VAT payer, change its bank accounts or enter insolvency at any time. Supplier Watch checks your suppliers every morning and emails you only when something changes. Free for up to 5 suppliers.</p>
-<p><a class="cta" href="/#signup">Watch this supplier for free</a> <a href="/check.html">Check another IČO</a> · <a href="/guides/">Guides</a></p>` : `<h2>Want to know when this changes?</h2>
+<p><a class="cta" href="/#signup">Watch this supplier for free</a> <a href="/check.html">Check another IČO</a> · <a href="/guides/">Guides</a></p>` : `<h2 style="margin-top:0">Want to know when this changes?</h2>
 <p>A supplier can become an unreliable VAT payer, change its bank accounts or enter insolvency at any time. We're working on daily monitoring that emails you when something changes; leave your email and we'll tell you when it's ready.</p>
 <p><a class="cta" href="/#updates">Get updates</a> <a href="/check.html">Check another IČO</a> · <a href="/guides/">Guides</a></p>`}</div>`;
 }
