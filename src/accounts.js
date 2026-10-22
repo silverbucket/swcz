@@ -165,13 +165,15 @@ export class Accounts {
         a.pendingConsent = { text: consentText, at: new Date(this.now()).toISOString() };
         const confirmToken = this.issue(a.id, 'confirm');
         // The updates opt-in belongs to this sign-up's link only: someone else re-submitting the form for the address
-        // must not add it to a link the owner confirms later.
-        if (updatesOptIn) a.updatesOptIn = [...(a.updatesOptIn ?? []), hash(confirmToken)].slice(-5);
+        // must not add it to a link the owner confirms later. Kept as long as the link is valid, like the token itself.
+        const live = (a.updatesOptIn ?? []).filter((o) => o.exp > this.now());
+        if (updatesOptIn) live.push({ h: hash(confirmToken), exp: this.now() + TOKEN_TTL_MS.confirm });
+        if (live.length) a.updatesOptIn = live; else delete a.updatesOptIn;
         return { account: a, confirmToken };
     }
     /** Whether the sign-up behind confirm token `t` ticked the updates box. Consumes only this link's choice: other pending links keep theirs. */
     takeUpdatesOptIn(a, t) {
-        const h = hash(t); const left = (a.updatesOptIn ?? []).filter((x) => x !== h); const yes = left.length < (a.updatesOptIn ?? []).length;
+        const h = hash(t); const all = a.updatesOptIn ?? []; const left = all.filter((o) => o.h !== h && o.exp > this.now()); const yes = all.some((o) => o.h === h);
         if (left.length) a.updatesOptIn = left; else delete a.updatesOptIn; return yes;
     }
     // Tokens are written straight to the database (no save() needed).

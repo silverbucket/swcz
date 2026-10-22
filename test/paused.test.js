@@ -144,6 +144,15 @@ test('monitoring sign-up with the updates box ticked joins the updates list when
     } finally { srv.close(); }
 });
 
+test('repeat sign-ups within the mail cooldown keep the opt-in of the link that was emailed', async () => {
+    const { dataDir, sent, srv } = setup({ MAIL_FORM_PER_IP: '100' }); const url = await listen(srv);
+    try {
+        for (let i = 0; i < 6; i++) await post(`${url}/signup`, { email: 'f@firma.cz', consent: 'yes', ico: '27082440', updates_optin: 'yes' });
+        assert.equal(sent.length, 1); assert.equal((await post(`${url}/confirm`, `t=${linkIn(sent[0], '/confirm', 't')}`)).status, 200);
+        assert.ok(updates(dataDir).get('f@firma.cz')?.confirmed_at);
+    } finally { srv.close(); }
+});
+
 test('health probes (secret header) are validated but store nothing, send nothing and skip rate limits', async () => {
     for (const env of [{}, PAUSED]) {
         const { dataDir, sent, srv } = setup({ ...env, MAIL_FORM_PER_IP: '1' }); const url = await listen(srv);
