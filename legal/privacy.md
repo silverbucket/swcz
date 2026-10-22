@@ -19,6 +19,10 @@ Czech version below.
 | Updates list: your email address, when you asked and confirmed, and the consent text | Occasional emails about Supplier Watch updates, e.g. when ongoing monitoring is back | Consent (6(1)(a)) | Until you unsubscribe with the link in any of these emails, then deleted at once. A request that is never confirmed is deleted after 7 days |
 | API keys | Authenticating API requests | Contract (6(1)(b)) | Only a SHA-256 hash; revoked keys are kept as a record until the account is deleted |
 | Technical logs (IP address, time, errors) | Security, debugging | Legitimate interest (6(1)(f)) | 30 days |
+| Website analytics: pages visited, clicks on the site, approximate location from a shortened IP address, browser and device type, referring website or campaign. If you have an account, its internal id (not your email) links these visits to your account and its plan payments | Understanding how the site and service are used and which channels bring customers, to improve them | Legitimate interest (6(1)(f)) | Raw visit data up to 25 months, then only aggregated reports |
+| How you first found us (referring website or campaign, if any), stored with your account at sign-up | Measuring which channels lead to paid plans | Legitimate interest (6(1)(f)) | With your account |
+
+**Analytics:** we use Matomo, installed on a server we operate, without cookies or other storage in your browser. Analytics data is not shared with anyone. You can object at contact@supplierwatch.cz, or block it in your browser; the site works the same.
 
 **We don't** use tracking or advertising cookies, sell data, profile people, or store birth dates, personal ID numbers (rodné číslo) or home addresses from the insolvency register. We never send register data to anyone except you.
 
@@ -46,6 +50,7 @@ Czech version below.
 - **Odběr novinek:** e-mail, čas žádosti a potvrzení a text souhlasu, pro občasné e-maily o novinkách Supplier Watch (např. obnovení průběžného sledování). Souhlas (čl. 6 odst. 1 písm. a). Do odhlášení odkazem v e-mailu, poté ihned smažeme; nepotvrzenou žádost mažeme po 7 dnech.
 - **API klíče:** ukládáme jen hash SHA-256.
 - **Technické logy:** 30 dní.
+- **Analytika webu:** navštívené stránky, kliknutí, přibližná poloha ze zkrácené IP adresy, typ prohlížeče a zařízení, odkazující web nebo kampaň; u zákazníků interní id účtu (ne e-mail), které propojí návštěvy s účtem a platbami za tarif. Používáme Matomo na serveru, který sami provozujeme, bez cookies a bez ukládání čehokoli do prohlížeče; data nikomu nepředáváme. Oprávněný zájem (čl. 6 odst. 1 písm. f) na zlepšování webu a služby. Podrobná data nejvýše 25 měsíců, poté jen souhrnné přehledy. Při registraci ukládáme k účtu, odkud jste k nám poprvé přišli (odkazující web nebo kampaň). Námitku můžete podat na contact@supplierwatch.cz.
 
 Nepoužíváme sledovací cookies, údaje neprodáváme, neprofilujeme a z insolvenčního rejstříku neukládáme data narození, rodná čísla ani adresy bydliště.
 **Zpracovatelé:** hosting serveru (Linode), rozesílání e-mailů Brevo (Sendinblue SAS, Francie), e-mailová schránka mailbox.org (Heinlein Support GmbH, Německo) a platební brána Stripe (Stripe Payments Europe Ltd, Irsko). Stripe může předávat platební údaje mimo EU/EHP na základě standardních smluvních doložek Evropské komise.
