@@ -692,7 +692,7 @@ el.innerHTML=h+'</ul>';}).catch(function(){el.innerHTML='<p class="muted">Status
 </script>"""
 
 API = """<h1>Supplier Watch API</h1>
-<p>A read-only JSON API for the <strong>Pro</strong> and <strong>Accountant</strong> plans: your suppliers, their latest check results and your alerts, for your own systems (ERP, accounting, dashboards).</p>
+<p>A read-only JSON API for the <strong>Accountant</strong> plan: your suppliers, their latest check results and your alerts, for your own systems (ERP, accounting, dashboards).</p>
 <h2>Authentication</h2>
 <p>Create a key on your manage page (API keys section). It is shown once; we store only a hash. Send it as a Bearer token:</p>
 <pre><code>curl -H "Authorization: Bearer sw_..." https://supplierwatch.cz/api/v1/suppliers</code></pre>
@@ -749,7 +749,7 @@ API = """<h1>Supplier Watch API</h1>
 for rel, title, desc, body, script in [
     ('about.html', 'About Supplier Watch', 'Who runs Supplier Watch CZ: Nicholas Kossow Jennings, sole trader, IČO 28948491, Prague. Contact contact@supplierwatch.cz.', ABOUT, ''),
     ('sources.html', 'Data sources', 'The official sources Supplier Watch uses: the VAT register, ARES, the insolvency register ISIR and the ČOI risky e-shop list, with licences and current status.', SOURCES, STATUS_JS),
-    ('api.html', 'API documentation', 'Read-only JSON API of Supplier Watch for Pro and Accountant plans: suppliers, latest check results and alerts.', API, ''),
+    ('api.html', 'API documentation', 'Read-only JSON API of Supplier Watch for the Accountant plan: suppliers, latest check results and alerts.', API, ''),
 ]:
     write(rel, page('', title, desc, body, '/' + rel, more=False, script=script))
 

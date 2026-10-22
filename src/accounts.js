@@ -280,9 +280,9 @@ export class Accounts {
     }
     setIcosMain(a, icos, websites = {}) { const room = Math.max(0, this.limit(a) - this.total(a, 'main')); a.icos = icos.slice(0, room); a.websites = pickWebsites(a.icos, websites); return { kept: a.icos.length, dropped: Math.max(0, icos.length - room) }; }
 
-    // ---- API keys (Pro and Accountant). Only a SHA-256 hash is stored; the key is shown once.
+    // ---- API keys (plans with api: true). Only a SHA-256 hash is stored; the key is shown once.
     createApiKey(a, label = '') {
-        if (!PLAN_INFO[a?.plan]?.api) return { error: 'API access needs the Pro or Accountant plan.' };
+        if (!PLAN_INFO[a?.plan]?.api) return { error: 'API access needs the Accountant plan.' };
         a.apiKeys ??= [];
         if (a.apiKeys.filter((k) => !k.revokedAt).length >= 5) return { error: 'At most 5 active API keys. Revoke one first.' };
         const id = `key_${crypto.randomBytes(5).toString('hex')}`; const secret = `sw_${crypto.randomBytes(24).toString('base64url')}`;

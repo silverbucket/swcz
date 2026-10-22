@@ -14,7 +14,7 @@ import { Accounts, PLANS, DELETE_GRACE_DAYS, parseSupplierForm, validEmail, norm
 import { createMailer } from './mailer.js';
 import { createFreeCheck, checkPageHtml, RateLimiter, clientIp } from './freecheck.js';
 import { createApi } from './api.js';
-import { PLAN_INFO } from './plans.js';
+import { OFFERED, PLAN_INFO } from './plans.js';
 import { historyMonths, validMonth } from './history.js';
 import { getReport, monthLabel } from './monthly.js';
 import { readStatus } from './canary.js';
@@ -81,7 +81,9 @@ export function createServer({
     const analytics = tracker ?? createTracker({ env, baseUrl, log, version: VERSION });
     const handleCheck = freeCheck ?? createFreeCheck({ env, dataDir, exempt: isProbe });
     const accFile = path.join(dataDir, 'accounts.json');
-    const links = { starter: env.STRIPE_LINK_STARTER || 'https://buy.stripe.com/test_3cIdR9dpr1vZ5YWbic1ZS00', pro: env.STRIPE_LINK_PRO || 'https://buy.stripe.com/test_bJe28rdprb6z0ECdqk1ZS01', accountant: env.STRIPE_LINK_ACCOUNTANT || ACCOUNTANT_TEST_LINK };
+    // Monthly Payment Links, and optional annual ones (10 months' price) shown only when configured.
+    const links = { starter: env.STRIPE_LINK_STARTER || 'https://buy.stripe.com/test_3cIdR9dpr1vZ5YWbic1ZS00', accountant: env.STRIPE_LINK_ACCOUNTANT || ACCOUNTANT_TEST_LINK };
+    const yearLinks = { starter: env.STRIPE_LINK_STARTER_YEAR, accountant: env.STRIPE_LINK_ACCOUNTANT_YEAR };
     const handleApi = createApi({ dataDir, env, now, log });
     const stripeKey = env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY;
     const canBill = (a) => Boolean(stripeKey && a.stripeCustomer && (a.plan !== 'free' || a.subscription)); // an unpaid subscription is fixed in the portal
@@ -102,17 +104,18 @@ export function createServer({
     const tooMany = (send) => send(429, page('Too many requests', '<p>Too many requests from your network. Please try again in an hour. / Příliš mnoho požadavků, zkuste to prosím za hodinu.</p>'));
     const unsubUrl = (a) => `${baseUrl}/unsubscribe?t=${a.unsubToken}`;
     const pausedHtml = page('Check a supplier free', `<h1>Check a supplier free / Ověřte dodavatele zdarma</h1><p>Supplier Watch checks any Czech supplier by IČO in the official registers, free and without an account.<br>Supplier Watch zdarma a bez registrace ověří libovolného českého dodavatele podle IČO v oficiálních registrech.</p><p><a class="cta" href="/check.html">Check a supplier free / Ověřit dodavatele</a> <a href="/#updates">Get updates / Novinky e-mailem</a></p>`, { events: [['Account', 'paused-page']] });
-    const checkoutUrl = (a, plan) => `${links[plan]}?client_reference_id=${encodeURIComponent(a.id)}&prefilled_email=${encodeURIComponent(a.email)}`;
+    const checkoutUrl = (a, plan, link = links[plan]) => `${link}?client_reference_id=${encodeURIComponent(a.id)}&prefilled_email=${encodeURIComponent(a.email)}`;
     const SCRIPTS = '<script src="/csvimport.js"></script><script src="/suppliers.js"></script>';
     const hidden = (t, extra = {}) => `<input type="hidden" name="t" value="${esc(t)}">${Object.entries(extra).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('')}`;
     const mlink = (t, params = {}) => `/manage?${new URLSearchParams({ t, ...params })}`;
     const upgradeHtml = (a, t) => {
-        const opts = ['starter', 'pro', 'accountant'].filter((p) => PLAN_INFO[p].limit > PLAN_INFO[a.plan].limit && links[p]);
+        const opts = OFFERED.filter((p) => PLAN_INFO[p].limit > PLAN_INFO[a.plan].limit && links[p]);
         if (!opts.length) return '';
         // A paid subscription changes plan in the Stripe portal; a new Checkout would start a second subscription.
         if (a.subscription) return canBill(a) ? `<h2>Upgrade</h2><form method="post" action="/manage">${hidden(t, { action: 'billing' })}<button>Change plan / Změnit tarif</button></form>` : '<h2>Upgrade</h2><p>To change your plan, write to <a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>.</p>';
-        const label = { starter: 'Starter: 50 suppliers, 190 Kč / month', pro: 'Pro: 500 suppliers + API, 490 Kč / month', accountant: 'Accountant: 2,000 suppliers, client lists + API, 990 Kč / month' };
-        return `<h2>Upgrade</h2><p>${opts.map((p) => `<a class="cta matomo_ignore" href="${esc(checkoutUrl(a, p))}" data-plan="${p}" data-plan-name="${esc(PLAN_INFO[p].name)}" data-price="${PLAN_INFO[p].priceKc}">${label[p]}</a>`).join(' ')}</p>`;
+        const what = { starter: '50 suppliers', accountant: '2,000 suppliers, client lists + API' };
+        const btn = (p, link, price, per) => `<a class="cta matomo_ignore" href="${esc(checkoutUrl(a, p, link))}" data-plan="${p}" data-plan-name="${esc(PLAN_INFO[p].name)}${per === 'year' ? ' (annual)' : ''}" data-price="${price}">${esc(PLAN_INFO[p].name)}: ${what[p] ?? `${PLAN_INFO[p].limit.toLocaleString('en-US')} suppliers`}, ${price.toLocaleString('en-US')} Kč / ${per}</a>`;
+        return `<h2>Upgrade</h2>${opts.map((p) => `<p>${btn(p, links[p], PLAN_INFO[p].priceKc, 'month')}${yearLinks[p] && PLAN_INFO[p].yearKc ? ` ${btn(p, yearLinks[p], PLAN_INFO[p].yearKc, 'year')}` : ''}</p>`).join('')}<p class="muted">Annual billing is 10 months' price, one invoice a year.</p>`;
     };
     const reportsHtml = (a, t, clientId = null) => {
         const months = historyMonths(dataDir, a.id).slice(0, 24);
@@ -120,7 +123,7 @@ export function createServer({
         return `<h2>Monthly reports / Měsíční protokoly</h2><p>PDF with every check we ran in the month${clientId ? ' for this client' : ''}, per supplier, with results and times. The current month is a report so far.</p><ul>${months.map((m) => `<li><a href="${esc(mlink(t, { report: m, ...(clientId ? { client: clientId } : {}) }))}">${esc(monthLabel(m))} (PDF)</a></li>`).join('')}</ul>`;
     };
     const keysHtml = (a, t, newKey = null) => {
-        if (!PLAN_INFO[a.plan]?.api) return `<h2>API</h2><p class="muted">A read-only JSON API is included with Pro and Accountant. <a href="/api.html">API documentation</a></p>`;
+        if (!PLAN_INFO[a.plan]?.api) return `<h2>API</h2><p class="muted">A read-only JSON API is included with the Accountant plan. <a href="/api.html">API documentation</a></p>`;
         const keys = (a.apiKeys ?? []).slice().reverse();
         return `<h2>API keys</h2>${newKey ? `<div class="box"><p><strong>New API key, shown only once. Copy it now:</strong></p><p><code>${esc(newKey)}</code></p><p class="muted">We store only a hash of it. If you lose it, revoke it and create a new one.</p></div>` : ''}
 <p>Use a key as <code>Authorization: Bearer &lt;key&gt;</code>. See the <a href="/api.html">API documentation</a>.</p>
@@ -143,7 +146,7 @@ ${cl.length ? `<table class="t"><tr><th>Client</th><th>Suppliers</th><th>Extra r
 <form method="post" action="/manage">${hidden(t, { action: 'delete_account' })}<label><input type="checkbox" name="sure" value="1" required> I want to delete my account / Chci smazat účet</label> <button>Delete my account / Smazat účet</button></form>`;
     };
     const ev = (...e) => e; // [category, action, name?, value?] for site/analytics.js
-    const plansOffered = (a) => !a.subscription && ['starter', 'pro', 'accountant'].some((p) => PLAN_INFO[p].limit > PLAN_INFO[a.plan].limit && links[p]);
+    const plansOffered = (a) => !a.subscription && OFFERED.some((p) => PLAN_INFO[p].limit > PLAN_INFO[a.plan].limit && links[p]);
     const manageHtml = (acc, a, t, note = '', { newKey, events = [] } = {}) => {
         const used = acc.total(a); const lim = acc.limit(a);
         const room = Math.max(a.icos.length, lim - acc.total(a, 'main'));
@@ -157,7 +160,7 @@ ${clientsHtml(acc, a, t)}
 ${reportsHtml(a, t)}
 ${keysHtml(a, t, newKey)}
 ${upgradeHtml(a, t)}
-${billingBtn(a, t)}${deletionHtml(acc, a, t)}<p class="muted">You can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.<br>Tarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.</p>`, { userId: a.id, plansView: plansOffered(a), events });
+${billingBtn(a, t)}${deletionHtml(acc, a, t)}<p class="muted">You can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid period, then moves to the free plan.<br>Tarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného období, poté přejde na bezplatný.</p>`, { userId: a.id, plansView: plansOffered(a), events });
     };
     const clientHtml = (acc, a, c, t, note = '', events = []) => {
         const room = Math.max(c.icos.length, acc.limit(a) - acc.total(a, c.id));
@@ -256,7 +259,7 @@ ${reportsHtml(a, t, c.id)}
             const { account, confirmToken } = acc.signup(email, icos, { consentText: CONSENT_TEXT, websites, updatesOptIn: f.updates_optin === 'yes', acq: parseAcq(f.acq) }); acc.save();
             if (!cooldown("signup", email)) {
                 await mailer.send({ to: email, unsubscribeUrl: unsubUrl(account), subject: 'Confirm your Supplier Watch sign-up / Potvrďte registraci',
-                    text: `Please confirm your email to start daily supplier checks (link valid 48 hours):\nPotvrďte prosím e-mail pro spuštění denních kontrol (odkaz platí 48 hodin):\n\n${baseUrl}/confirm?t=${confirmToken}&mtm_campaign=confirm-email\n\nYou can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.\nTarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.\n\nIf you did not sign up, ignore this email. / Pokud jste se neregistrovali, e-mail ignorujte.` });
+                    text: `Please confirm your email to start daily supplier checks (link valid 48 hours):\nPotvrďte prosím e-mail pro spuštění denních kontrol (odkaz platí 48 hodin):\n\n${baseUrl}/confirm?t=${confirmToken}&mtm_campaign=confirm-email\n\nYou can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid period, then moves to the free plan.\nTarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného období, poté přejde na bezplatný.\n\nIf you did not sign up, ignore this email. / Pokud jste se neregistrovali, e-mail ignorujte.` });
             }
             const capped = icos.length > PLANS.free ? `<p>The free plan covers ${PLANS.free} suppliers; the first ${PLANS.free} were kept. You can upgrade after confirming.</p>` : '';
             return send(200, page('Check your email', `<h1>Check your email / Zkontrolujte e-mail</h1><p>We sent a confirmation link to ${esc(email)}.</p>${capped}${invalid.length ? `<p>Ignored invalid IČO: ${esc(invalid.join(', '))}</p>` : ''}`,

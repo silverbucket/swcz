@@ -19,7 +19,8 @@ test('home: "What we check" near the top with all five checks, why it matters an
 
 test('pricing in full Kč including the Accountant plan; no CZK anywhere on the site', () => {
     const h = site('index.html');
-    for (const p of ['0 Kč', '190 Kč / month', '490 Kč / month', '990 Kč / month', '2,000']) assert.ok(h.includes(p), p);
+    assert.ok(!h.includes('490 Kč') && !/<h3>Pro<\/h3>/.test(h), 'Pro is hidden');
+    for (const p of ['0 Kč', '190 Kč / month', '1,900 Kč / year', '990 Kč / month', '9,900 Kč / year', '2,000']) assert.ok(h.includes(p), p);
     const files = []; const walk = (d) => { for (const f of fs.readdirSync(d)) { const p = path.join(d, f); if (fs.statSync(p).isDirectory()) walk(p); else if (/\.(html|js|xml|txt)$/.test(f)) files.push(p); } };
     walk(new URL('../site', import.meta.url).pathname);
     for (const f of [...files, ...['terms.md', 'privacy.md'].map((x) => new URL(`../legal/${x}`, import.meta.url).pathname)]) {

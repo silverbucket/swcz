@@ -73,7 +73,7 @@ test('API plan gating: starter key -> 403 plan_required; clients endpoint only f
         r = await w.get('/api/v1/clients', w.keyD); j = await r.json(); assert.equal(r.status, 200);
         assert.deepEqual(j.data.map((c) => [c.name, c.suppliers]), [['Novák s.r.o.', 2], ['Dvořák a.s.', 1]]);
         // creating a key on a non-API plan is refused
-        const acc = accounts(w.dataDir); assert.match(acc.createApiKey(acc.byEmail('starter@c.cz')).error, /Pro or Accountant/);
+        const acc = accounts(w.dataDir); assert.match(acc.createApiKey(acc.byEmail('starter@c.cz')).error, /needs the Accountant plan/);
     } finally { w.srv.close(); }
 });
 
@@ -182,6 +182,6 @@ test('manage page: create key (shown once), list prefix, revoke; key works then 
         // free/starter accounts see no key form
         const s = acc.byEmail('starter@c.cz');
         const acc3 = accounts(w.dataDir); const ts2 = acc3.issue(s.id, 'manage'); acc3.save();
-        html = await (await fetch(`${w.url}/manage?t=${ts2}`)).text(); assert.ok(!html.includes('Create API key')); assert.match(html, /included with Pro and Accountant/);
+        html = await (await fetch(`${w.url}/manage?t=${ts2}`)).text(); assert.ok(!html.includes('Create API key')); assert.match(html, /included with the Accountant plan/);
     } finally { w.srv.close(); }
 });

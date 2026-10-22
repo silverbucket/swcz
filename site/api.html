@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>API documentation | Supplier Watch CZ</title>
-<meta name="description" content="Read-only JSON API of Supplier Watch for Pro and Accountant plans: suppliers, latest check results and alerts.">
+<meta name="description" content="Read-only JSON API of Supplier Watch for the Accountant plan: suppliers, latest check results and alerts.">
 <link rel="canonical" href="https://supplierwatch.cz/api.html">
 <style>:root{--ink:#14202b;--muted:#5b6875;--line:#e3e8ee;--bg:#f6f8fa;--brand:#0a7c5a}
 *{box-sizing:border-box}body{margin:0;font:17px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink)}
@@ -24,7 +24,7 @@ pre{background:#f1f3f5;border-radius:8px;padding:12px 14px;overflow:auto;font-si
 <header class="top"><div class="wrap"><a class="logo" href="/">Supplier Watch <span>CZ</span></a><nav><a href="/#checks">What we check</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><!--if monitoring--><a href="/#pricing">Pricing</a><!--end--></nav></div></header>
 <main class="wrap">
 <h1>Supplier Watch API</h1>
-<p>A read-only JSON API for the <strong>Pro</strong> and <strong>Accountant</strong> plans: your suppliers, their latest check results and your alerts, for your own systems (ERP, accounting, dashboards).</p>
+<p>A read-only JSON API for the <strong>Accountant</strong> plan: your suppliers, their latest check results and your alerts, for your own systems (ERP, accounting, dashboards).</p>
 <h2>Authentication</h2>
 <p>Create a key on your manage page (API keys section). It is shown once; we store only a hash. Send it as a Bearer token:</p>
 <pre><code>curl -H "Authorization: Bearer sw_..." https://supplierwatch.cz/api/v1/suppliers</code></pre>

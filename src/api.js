@@ -1,4 +1,4 @@
-// Read-only JSON API for Pro and Accountant plans. Bearer API keys (stored hashed), per-key rate limit,
+// Read-only JSON API for plans with api: true (Accountant; legacy Pro). Bearer API keys (stored hashed), per-key rate limit,
 // consistent error JSON: { "error": { "code": "...", "message": "..." } }. Documented in site/api.html.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -69,7 +69,7 @@ export function createApi({ dataDir, env = process.env, now = () => Date.now(), 
         if (!found) return fail(err(401, 'invalid_api_key', 'API key not recognised.', { 'www-authenticate': 'Bearer error="invalid_token"' }));
         if (found.revoked) return fail(err(401, 'revoked_api_key', 'This API key has been revoked. Create a new one on your manage page.', { 'www-authenticate': 'Bearer error="invalid_token"' }));
         const a = found.account;
-        if (!PLAN_INFO[a.plan]?.api) return { error: err(403, 'plan_required', 'API access needs the Pro or Accountant plan. Upgrade on your manage page.') };
+        if (!PLAN_INFO[a.plan]?.api) return { error: err(403, 'plan_required', 'API access needs the Accountant plan. Upgrade on your manage page.') };
         if (!a.confirmed) return { error: err(403, 'account_not_confirmed', 'Confirm your email address first.') };
         if (a.deleteAt) return { error: err(403, 'account_pending_deletion', `This account is scheduled for deletion on ${a.deleteAt.slice(0, 10)}. Keep it on your manage page to use the API again.`) };
         if (!found.key.lastUsedAt || now() - Date.parse(found.key.lastUsedAt) > 10 * 60e3) { found.key.lastUsedAt = new Date(now()).toISOString(); try { acc.save(); } catch (e) { log(`api: could not save lastUsedAt: ${e.message}`); } }

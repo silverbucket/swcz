@@ -4,11 +4,14 @@ import crypto from 'node:crypto';
 import { runAll } from '../src/run.js';
 import { createServer } from '../src/server.js';
 import { applyEvent } from '../src/billing.js';
-import { PLANS, PLAN_INFO } from '../src/plans.js';
+import { PLANS, PLAN_INFO, OFFERED, PLAN_BY_AMOUNT } from '../src/plans.js';
 import { tmp, icos, fakeWorld, mailbox, listen, post, makeAccount, accounts } from './fixtures/helpers.js';
 
 test('plan config: Accountant is 990 Kč / month with 2,000 suppliers; Stripe amount and metadata map to it', () => {
     assert.equal(PLANS.accountant, 2000); assert.equal(PLAN_INFO.accountant.priceKc, 990); assert.equal(PLAN_INFO.accountant.clients, true); assert.equal(PLAN_INFO.pro.api, true); assert.equal(PLAN_INFO.starter.api, false);
+    assert.deepEqual(OFFERED, ['starter', 'accountant'], 'Pro is hidden'); assert.equal(PLAN_INFO.pro.hidden, true);
+    assert.equal(PLAN_INFO.starter.yearKc, 1900); assert.equal(PLAN_INFO.accountant.yearKc, 9900, 'annual = 10 months');
+    assert.equal(PLAN_BY_AMOUNT[190000], 'starter'); assert.equal(PLAN_BY_AMOUNT[990000], 'accountant'); assert.equal(PLAN_BY_AMOUNT[99000], 'accountant');
     const dataDir = tmp('swacc0-'); const a = makeAccount(dataDir, 'u@x.cz'); const acc = accounts(dataDir); const x = acc.get(a.id); x.stripeCustomer = 'cus_1';
     acc.applyStripe({ type: 'customer.subscription.updated', data: { object: { customer: 'cus_1', status: 'active', items: { data: [{ price: { unit_amount: 99000 } }] } } } });
     assert.equal(x.plan, 'accountant');
@@ -71,7 +74,7 @@ test('manage page: add client, edit its suppliers and recipients, per-client rep
         // a Pro account cannot add clients
         const p = makeAccount(dataDir, 'pro@x.cz', { plan: 'pro' }); const acc2 = accounts(dataDir); const tp = acc2.issue(p.id, 'manage'); acc2.save();
         assert.equal((await post(`${url}/manage`, { t: tp, action: 'add_client', name: 'X' })).status, 400);
-        html = await (await fetch(`${url}/manage?t=${tp}`)).text(); assert.match(html, /Accountant: 2,000 suppliers, client lists \+ API, 990 Kč \/ month/); assert.match(html, /buy\.stripe\.com\/test_14AdR92KNeiL730fys1ZS02/);
+        html = await (await fetch(`${url}/manage?t=${tp}`)).text(); assert.match(html, /Accountant: 2,000 suppliers, client lists \+ API, 990 Kč \/ month/); assert.match(html, /buy\.stripe\.com\/test_14AdR92KNeiL730fys1ZS02/); assert.doesNotMatch(html, /Pro: 500/, 'Pro is not offered');
     } finally { srv.close(); }
 });
 
