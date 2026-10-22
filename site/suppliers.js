@@ -33,6 +33,9 @@
       r.querySelector('[name=ico]').value = ico || ''; r.querySelector('[name=web]').value = web || '';
       rows.appendChild(r); refresh(); return r;
     }
+    function skipped(n, how) { // for site/analytics.js: the plan limit stopped a paste or import
+      if (n) box.dispatchEvent(new CustomEvent('sw-limit', { bubbles: true, detail: { over: n, how: how } }));
+    }
     function check(input) {
       var v = input.value.trim(), msg = '';
       if (input.name === 'ico') {
@@ -59,7 +62,7 @@
       if (window.SWCsv && window.SWCsv.looksLikeCsv(paste.value)) { // a whole pasted export: same parser as file import
         var r = window.SWCsv.parseText(paste.value), have0 = all().map(function (x) { return x.querySelector('[name=ico]').value.trim().padStart(8, '0'); }), over0 = 0;
         r.rows.forEach(function (row) { if (have0.indexOf(row.ico) > -1) return; var el = all().filter(function (x) { return !x.querySelector('[name=ico]').value.trim(); })[0] || newRow(); if (!el) { over0++; return; } el.querySelector('[name=ico]').value = row.ico; el.querySelector('[name=web]').value = row.web || ''; have0.push(row.ico); });
-        paste.value = ''; err.textContent = (r.invalid.length ? 'Not recognised: ' + r.invalid.map(function (x) { return x.value; }).join(', ') + '. ' : '') + (over0 ? over0 + ' over your plan limit were skipped.' : ''); refresh(); return;
+        paste.value = ''; err.textContent = (r.invalid.length ? 'Not recognised: ' + r.invalid.map(function (x) { return x.value; }).join(', ') + '. ' : '') + (over0 ? over0 + ' over your plan limit were skipped.' : ''); refresh(); skipped(over0, 'paste'); return;
       }
       var bad = [], over = 0, last = null;
       var have = all().map(function (r) { return r.querySelector('[name=ico]').value.trim().padStart(8, '0'); });
@@ -80,7 +83,7 @@
       });
       paste.value = '';
       err.textContent = (bad.length ? 'Not recognised: ' + bad.join(', ') + '. ' : '') + (over ? over + ' over your plan limit were skipped.' : '');
-      refresh();
+      refresh(); skipped(over, 'paste');
     });
     // CSV import (Pohoda, Money S3, Fakturoid or any CSV with an IČO column): preview into the rows.
     var file = box.querySelector('.sw-file'), info = box.querySelector('.sw-csvinfo');
@@ -103,7 +106,7 @@
         });
         info.textContent = 'Detected: ' + (r.format === 'generic' ? 'CSV' : r.format + ' export') + ' (' + r.encoding + ', delimiter "' + r.delimiter + '"). Added ' + added + ' supplier' + (added === 1 ? '' : 's') + ' to the rows below' +
           (over ? '; ' + over + ' over your plan limit were skipped' : '') + (dupes ? '; ' + dupes + ' duplicates skipped' : '') + (r.invalid.length ? '; problems: ' + r.invalid.slice(0, 8).map(function (x) { return 'line ' + x.line + ' ' + x.value + ' (' + x.reason + ')'; }).join(', ') + (r.invalid.length > 8 ? ' and ' + (r.invalid.length - 8) + ' more' : '') : '') + '. Check the rows, then save.';
-        file.value = ''; refresh();
+        file.value = ''; refresh(); skipped(over, 'csv import');
       };
       rd.readAsArrayBuffer(f);
     });
