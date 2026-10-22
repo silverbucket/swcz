@@ -3,7 +3,7 @@
 import os, datetime
 ROOT = os.path.join(os.path.dirname(__file__), '..', 'site')
 BASE = 'https://supplierwatch.cz'
-UPDATED = '21 October 2026'
+UPDATED = '22 October 2026'
 CSS = """:root{--ink:#14202b;--muted:#5b6875;--line:#e3e8ee;--bg:#f6f8fa;--brand:#0a7c5a}
 *{box-sizing:border-box}body{margin:0;font:17px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink)}
 a{color:var(--brand)}.wrap{max-width:760px;margin:0 auto;padding:0 20px}
@@ -196,12 +196,391 @@ guide('doing-business-with-czech-suppliers',
 {CTA}
 {DISCLAIMER}""", 'Guide for foreign companies')
 
+# ---------- Shared links for the guides below ----------
+L_ZDPH = '<a href="https://www.zakonyprolidi.cz/cs/2004-235" rel="noopener">Act No. 235/2004 Sb., on VAT (zakonyprolidi.cz)</a>'
+L_REG = '<a href="https://adisspr.mfcr.cz/dpr/DphReg" rel="noopener">VAT register (Registr plátců DPH), Financial Administration</a>'
+L_REGHELP = '<a href="https://adisspr.mfcr.cz/adis/idph/a_napo_i_dph.htm" rel="noopener">VAT register help in English</a>'
+L_FSUNREL = '<a href="https://financnisprava.gov.cz/en/taxes/tax-obligations/value-added-tax/unreliable-vat-payer/information-on-an-unreliable-vat-payer-in-the-czech-republic" rel="noopener">Information on an unreliable VAT payer (Financial Administration, English)</a>'
+L_FSRUC = '<a href="https://financnisprava.gov.cz/cs/dane/dane/dan-z-pridane-hodnoty/informace-stanoviska-a-sdeleni/ruceni" rel="noopener">Ručení: information and guidance on VAT liability (Financial Administration)</a>'
+L_FSRUCPDF = '<a href="https://financnisprava.gov.cz/assets/cs/prilohy/d-seznam-dani/2021_DPH_Info_k_ruceni.pdf" rel="noopener">Information on VAT liability and §109a (Financial Administration, PDF, Czech)</a>'
+L_INS = '<a href="https://www.zakonyprolidi.cz/cs/2006-182" rel="noopener">Act No. 182/2006 Sb., the Insolvency Act (zakonyprolidi.cz)</a>'
+L_ISIR = '<a href="https://isir.justice.cz/" rel="noopener">Insolvency register ISIR, Ministry of Justice</a>'
+L_ARES = '<a href="https://ares.gov.cz/" rel="noopener">ARES, Ministry of Finance</a>'
+L_OR = '<a href="https://or.justice.cz/" rel="noopener">Public register (Veřejný rejstřík), Ministry of Justice</a>'
+L_OZ = '<a href="https://www.zakonyprolidi.cz/cs/2012-89" rel="noopener">Act No. 89/2012 Sb., the Civil Code, §187 (zakonyprolidi.cz)</a>'
+L_VIES = '<a href="https://ec.europa.eu/taxation_customs/vies/" rel="noopener">VIES VAT number validation, European Commission</a>'
+L_COI = '<a href="https://www.coi.gov.cz/pro-spotrebitele/rizikove-e-shopy/" rel="noopener">Risky e-shops list (Rizikové e-shopy), ČOI</a>'
+
+def G(slug, text): return f'<a href="/guides/{slug}.html">{text}</a>'
+G109 = 'czech-vat-liability-unreliable-payer-bank-accounts'
+GCHECK = 'how-to-check-a-czech-supplier'
+GFOREIGN = 'doing-business-with-czech-suppliers'
+
+def src(*links): return '<h2>Official sources</h2><ul>' + ''.join(f'<li>{l}</li>' for l in links) + '</ul>'
+def meta(mins): return f'<p class="meta">Updated {UPDATED} · about {mins} minutes</p>'
+
+ALERT = '<p>A supplier\'s status can change on any day. Supplier Watch checks the registers every morning and emails you the day a supplier you watch changes, free for up to 5 suppliers.</p>'
+
+# ---------- Guide 4 ----------
+guide('czech-unreliable-vat-payer-list',
+ 'The Czech unreliable VAT payer list: what it is and how to check it',
+ 'What the Czech list of unreliable VAT payers (nespolehlivý plátce) is, who ends up on it, how to search it, and why one check before signing is not enough.',
+ f"""<h1>The Czech unreliable VAT payer list</h1>
+{meta(4)}
+<p>The Czech tax administration publishes which VAT payers it has declared <strong>unreliable</strong> (nespolehlivý plátce). If you are a Czech VAT payer and buy from a supplier that is on this list, the law presumes you knew its VAT might not be paid, and you can be asked to pay that VAT yourself. See {G(G109, 'our guide to §109 VAT liability')}.</p>
+<h2>Who ends up on it</h2>
+<p>Under §106a of the VAT Act, the tax administrator decides that a VAT payer is unreliable if it has <strong>seriously breached its obligations</strong> in the administration of tax. The supplier can appeal within 15 days. There is also a separate status, <strong>unreliable person</strong> (nespolehlivá osoba, §106aa), for businesses that are not VAT payers. A payer can ask to be removed, but no earlier than one year after the decision became final (§106ac).</p>
+<h2>How to search it</h2>
+<ol>
+<li>Open the {L_REG}.</li>
+<li>Enter the supplier's DIČ without "CZ" (for a company this is usually its IČO). You can enter up to 20 numbers at once.</li>
+<li>Read the field <em>Nespolehlivý plátce</em>: <strong>NE</strong> means not unreliable, <strong>ANO</strong> means unreliable.</li>
+<li>Leave the number empty and choose "nespolehlivý plátce" to see the whole published list.</li>
+</ol>
+<p>The register's {L_REGHELP} explains the search form.</p>
+<h2>Why one check is not enough</h2>
+<p>The status that matters is the one when the tax becomes due and when you pay, not when you signed the contract. A supplier that was fine in January can be published in March. That is why the Financial Administration and tax advisers recommend checking before each payment. If you already paid an unreliable payer, read {G('supplier-became-unreliable-vat-payer', 'what to do when a supplier becomes unreliable')}.</p>
+{ALERT}
+{CTA}
+{src(L_ZDPH, L_REG, L_REGHELP, L_FSUNREL)}
+{DISCLAIMER}""", 'Unreliable payer list')
+
+# ---------- Guide 5 ----------
+guide('supplier-became-unreliable-vat-payer',
+ 'Your Czech supplier became an unreliable VAT payer: what to do',
+ 'Steps to take when a Czech supplier is published as an unreliable VAT payer: before you pay the next invoice, paying the VAT to the tax office under §109a, and what to do about invoices already paid.',
+ f"""<h1>Your Czech supplier became an unreliable VAT payer: what to do</h1>
+{meta(5)}
+<p>You found out that a supplier is now published as an unreliable VAT payer (nespolehlivý plátce). This guide covers the practical options. It applies if you are a Czech VAT payer buying a taxable supply in the Czech Republic.</p>
+<h2>1. Confirm the status and the date</h2>
+<p>Look the supplier up in the {L_REG} and save a printout or screenshot. Note the date from which the supplier is published as unreliable. What matters for each invoice is whether the supplier was unreliable when the VAT on that supply became due or when you paid (§109(1) and (2)(a) of the VAT Act).</p>
+<h2>2. Open invoices: you can pay the VAT straight to the tax office</h2>
+<p>For an invoice you have not yet paid, you can pay the supplier only the price without VAT and pay the VAT part directly to the supplier's tax office. This is the <strong>special way of securing tax</strong> under §109a. The Financial Administration states that a buyer who pays the VAT this way cannot become guarantor for the VAT on that supply. You must do it before you are called on as guarantor. See {G('pay-vat-for-supplier-czech-109a', 'how to pay VAT for a supplier under §109a')}.</p>
+<p>Your contract may say you must pay the full amount to the supplier. Many Czech contracts include a clause allowing §109a payments; check yours, or agree it with the supplier.</p>
+<h2>3. Invoices you already paid</h2>
+<p>Liability is not automatic. The tax office first tries to collect the VAT from the supplier, and can only call on you as guarantor if the supplier does not pay. Keep your records of the checks you made. If a call (výzva ručiteli) arrives, talk to a tax adviser.</p>
+<h2>4. Decide about the relationship</h2>
+<p>An unreliable status means the tax office found a serious breach of tax duties. Consider asking for advance invoices to be dropped, shorter payment terms for them rather than you, or a different supplier. Check also the {G('czech-insolvency-register-isir-english', 'insolvency register')}.</p>
+{ALERT}
+{CTA}
+{src(L_ZDPH, L_REG, L_FSRUC, L_FSRUCPDF)}
+{DISCLAIMER}""", 'Supplier became unreliable')
+
+# ---------- Guide 6 ----------
+guide('pay-vat-for-supplier-czech-109a',
+ 'Paying VAT directly for your supplier (§109a): the Czech "special way of securing tax"',
+ 'How a Czech VAT payer can pay its supplier\'s VAT straight to the supplier\'s tax office under §109a of the VAT Act, what the payment must identify, and why it removes the §109 liability for that supply.',
+ f"""<h1>Paying VAT directly for your supplier (§109a)</h1>
+{meta(4)}
+<p>Czech VAT law gives buyers a way to remove the risk of {G(G109, '§109 liability')}: pay the supplier's VAT yourself, directly to the supplier's tax office. The law calls it <strong>zvláštní způsob zajištění daně</strong>, the special way of securing tax (§109a of the VAT Act).</p>
+<h2>What the law says</h2>
+<ul>
+<li>If the buyer pays the VAT on a supply for the supplier <strong>without having been called on as guarantor</strong>, the payment is used only for the supplier's VAT on that supply (§109a(1)).</li>
+<li>The payment goes to the <strong>supplier's tax administrator</strong> (§109a(2)). It is credited to the supplier's personal deposit account and moved to its tax account when the VAT falls due (§109a(4)).</li>
+<li>With the payment you must state, in the way the tax administrator publishes: the supplier's identification, the tax the payment is for, your own identification, and the date of the supply or of payment (§109a(2)). If the date is missing, the date the tax office receives the money is used (§109a(3)).</li>
+</ul>
+<h2>Why it helps</h2>
+<p>The Financial Administration's guidance on liability says a buyer who pays the VAT this way can never become guarantor under §109 for that supply. It is the clean option when a supplier turns out to be {G('czech-unreliable-vat-payer-list', 'an unreliable VAT payer')}, or the invoice shows a {G('czech-published-bank-account-check', 'bank account that is not published')}.</p>
+<h2>In practice</h2>
+<ol>
+<li>Find the supplier's tax office (it is shown in the {L_REG}).</li>
+<li>Look up that office's account and payment details on the Financial Administration website, as the law refers to the way the tax administrator publishes them.</li>
+<li>Pay the supplier the price without VAT, and the VAT to the tax office, with the required details.</li>
+<li>Tell the supplier, and keep proof of both payments.</li>
+</ol>
+<p>Payments made this way are voluntary and the guidance says they are not refunded to you later, even if the supplier's VAT is corrected. Get your exact payment details confirmed by a tax adviser the first time.</p>
+{CTA}
+{src(L_ZDPH, L_FSRUC, L_FSRUCPDF, L_REG)}
+{DISCLAIMER}""", 'Paying VAT for a supplier (§109a)')
+
+# ---------- Guide 7 ----------
+guide('czech-published-bank-account-check',
+ 'Checking a Czech supplier\'s published bank account before you pay',
+ 'How to check that the bank account on a Czech invoice is one the supplier has published in the VAT register, how to read the account history, and what happens if you pay to an unpublished account.',
+ f"""<h1>Checking a Czech supplier's published bank account</h1>
+{meta(4)}
+<p>Czech VAT payers publish the bank accounts they use for business in the VAT register. When you pay a Czech VAT payer by bank transfer to an account that is <strong>not</strong> published, the law presumes you knew its VAT might go unpaid (§109(2)(c)(2) of the VAT Act). Since 1 January 2025 there is no minimum amount for this rule. Details are in {G(G109, 'our §109 guide')}.</p>
+<h2>Where the accounts come from</h2>
+<p>A VAT payer lists all accounts used for its business when it registers and chooses which of them are published (§96). The tax administrator publishes the chosen accounts, or the fact that none was chosen (§98(d)).</p>
+<h2>How to check</h2>
+<ol>
+<li>Open the {L_REG} and enter the supplier's DIČ without "CZ".</li>
+<li>Look at <em>Bankovní účty</em> (bank accounts) and the date each was published.</li>
+<li>Compare the account number on the invoice exactly, digit for digit, including the bank code.</li>
+<li>Use the account history (historie účtů) to see accounts whose publication ended.</li>
+</ol>
+<h2>If the account is not there</h2>
+<ul>
+<li>Do not pay to it until you have checked with the supplier through a contact you already trust, not the one on the invoice or email. See {G('supplier-changed-bank-account-fraud', 'bank-account change fraud')}.</li>
+<li>Ask the supplier to publish the account, or to give you a published one.</li>
+<li>Or pay the VAT part directly to the tax office under {G('pay-vat-for-supplier-czech-109a', '§109a')}.</li>
+</ul>
+<p>Accounts abroad are not published in the Czech register, so a transfer to a foreign account is treated the same way.</p>
+{ALERT}
+{CTA}
+{src(L_ZDPH, L_REG, L_REGHELP, L_FSRUC)}
+{DISCLAIMER}""", 'Published bank accounts')
+
+# ---------- Guide 8 ----------
+guide('supplier-changed-bank-account-fraud',
+ '"Our bank details have changed": invoice fraud and Czech suppliers',
+ 'How fake "new bank account" emails work, how to verify a Czech supplier\'s account using the official VAT register, and a simple payment process that protects against invoice redirection.',
+ f"""<h1>"Our bank details have changed": invoice fraud and Czech suppliers</h1>
+{meta(4)}
+<p>A common fraud is a message that looks like it comes from a real supplier and asks you to pay future invoices to a new bank account. The email may come from a hacked mailbox or a look-alike address, and the invoice may look genuine.</p>
+<h2>Why Czech suppliers are easier to verify</h2>
+<p>Czech VAT payers must list their business accounts with the tax office and can publish them in the {L_REG}. A real new account usually appears there. An account that is not published is a warning sign, and paying it also creates a {G(G109, '§109 VAT liability')} risk for Czech VAT payers.</p>
+<h2>A simple process</h2>
+<ol>
+<li>Never change payment details on the strength of an email or invoice alone.</li>
+<li>Call the supplier on a number you already had, not one in the message.</li>
+<li>Check the new account in the VAT register ({G('czech-published-bank-account-check', 'how to check')}).</li>
+<li>Have a second person approve any change of supplier bank details.</li>
+<li>Recheck the published accounts right before each payment run.</li>
+</ol>
+<p>If you think you paid a fraudster, contact your bank at once and report it to the police.</p>
+<p>Supplier Watch emails you when a watched supplier's published accounts change, so a real change and a fake one look different: one shows up in the register, the other does not.</p>
+{CTA}
+{src(L_REG, L_ZDPH)}
+{DISCLAIMER}""", 'Bank-account change fraud')
+
+# ---------- Guide 9 ----------
+guide('czech-insolvency-register-isir-english',
+ 'The Czech insolvency register (ISIR) in English: how to search and read it',
+ 'How to search the Czech insolvency register ISIR by IČO, what the main Czech terms mean in English, and when to check a supplier for insolvency.',
+ f"""<h1>The Czech insolvency register (ISIR) in English</h1>
+{meta(5)}
+<p>ISIR (insolvenční rejstřík) is the public register of insolvency proceedings, run by the Ministry of Justice (§419 of the Insolvency Act). It holds a list of debtors and the insolvency file for each one, and it is free to search.</p>
+<h2>How to search</h2>
+<ol>
+<li>Open {L_ISIR}.</li>
+<li>Enter the supplier's IČO (or name) and search.</li>
+<li>If a proceeding exists, open it to see the file: the petition, court decisions and their dates.</li>
+</ol>
+<h2>Terms you will see</h2>
+<table>
+<tr><th>Czech</th><th>English</th></tr>
+<tr><td>Insolvenční návrh</td><td>Insolvency petition. Proceedings start on the day it reaches the court (§97(1)).</td></tr>
+<tr><td>Úpadek</td><td>Insolvency (the debtor is found insolvent)</td></tr>
+<tr><td>Rozhodnutí o úpadku</td><td>Decision declaring insolvency</td></tr>
+<tr><td>Konkurs</td><td>Bankruptcy (liquidation of assets)</td></tr>
+<tr><td>Reorganizace</td><td>Reorganisation</td></tr>
+<tr><td>Oddlužení</td><td>Debt relief (mainly for individuals)</td></tr>
+<tr><td>Insolvenční správce</td><td>Insolvency administrator</td></tr>
+<tr><td>Přihláška pohledávky</td><td>Filing of a creditor's claim</td></tr>
+<tr><td>Odmítnutí / zamítnutí návrhu</td><td>Petition rejected or dismissed</td></tr>
+</table>
+<h2>What it means for you</h2>
+<p>A petition is not proof that the supplier is insolvent; some are rejected. But it is an early warning: think twice about advance payments, long warranties or big orders, and if the supplier owes you money, deadlines for filing claims apply. Ask a lawyer about those.</p>
+<p>ISIR changes daily. For other checks see {G(GCHECK, 'how to check a Czech supplier')}.</p>
+{ALERT}
+{CTA}
+{src(L_ISIR, L_INS)}
+{DISCLAIMER}""", 'Insolvency register (ISIR)')
+
+# ---------- Guide 10 ----------
+guide('czech-company-in-liquidation',
+ 'How to tell if a Czech company is in liquidation or has been struck off',
+ 'How to see in ARES and the public register whether a Czech company is in liquidation ("v likvidaci"), dissolved or deleted, and what that means for orders and payments.',
+ f"""<h1>How to tell if a Czech company is in liquidation or has been struck off</h1>
+{meta(4)}
+<h2>The quick sign: "v likvidaci"</h2>
+<p>Under §187(2) of the Civil Code, a legal entity enters liquidation on the day it is dissolved, and while in liquidation it uses its name with the addition <strong>"v likvidaci"</strong> (in liquidation). The liquidator must have the entry into liquidation recorded in the public register without undue delay.</p>
+<p>The purpose of liquidation is to settle the company's assets, pay its creditors and deal with what is left (§187(1)). Once it is in liquidation, nobody may act for it beyond what the law allows for winding up (§188).</p>
+<h2>Where to check</h2>
+<ol>
+<li>{L_ARES}: search the IČO. Look at the name, the status of the record, and the date of deletion (datum zániku) if any.</li>
+<li>{L_OR}: open the company's extract (výpis). It shows entry into liquidation, the liquidator (likvidátor) and deletion from the register (výmaz).</li>
+<li>{L_ISIR}: liquidation and insolvency are different procedures; check both.</li>
+</ol>
+<h2>What it means for you</h2>
+<ul>
+<li>Do not make advance payments to a company in liquidation without advice.</li>
+<li>If it owes you money, file your claim with the liquidator.</li>
+<li>Once a company is deleted from the register, it no longer exists.</li>
+</ul>
+<p>See also {G('ares-czech-business-register-english', 'how to read ARES in English')}.</p>
+{ALERT}
+{CTA}
+{src(L_OZ, L_ARES, L_OR, L_ISIR)}
+{DISCLAIMER}""", 'Liquidation and deletion')
+
+# ---------- Guide 11 ----------
+guide('ares-czech-business-register-english',
+ 'ARES, the Czech business register, explained in English',
+ 'What ARES is, how to look up a Czech company by IČO or name, and an English translation of the main fields in an ARES record.',
+ f"""<h1>ARES, the Czech business register, explained in English</h1>
+{meta(4)}
+<p>ARES (Administrativní registr ekonomických subjektů) is run by the Ministry of Finance. It brings together data about businesses from several public registers, including the public (commercial) register, the trade licence register and the VAT register. It is free and needs no account.</p>
+<h2>How to search</h2>
+<ol>
+<li>Open {L_ARES}.</li>
+<li>Type the IČO (8 digits) or the company name.</li>
+<li>Open the result to see the record and links to the source registers.</li>
+</ol>
+<h2>Main fields in English</h2>
+<table>
+<tr><th>Czech</th><th>English</th></tr>
+<tr><td>Obchodní jméno / firma</td><td>Business name</td></tr>
+<tr><td>IČO</td><td>Company identification number</td></tr>
+<tr><td>DIČ</td><td>Tax / VAT number</td></tr>
+<tr><td>Sídlo</td><td>Registered office</td></tr>
+<tr><td>Právní forma</td><td>Legal form (s.r.o., a.s., sole trader…)</td></tr>
+<tr><td>Datum vzniku</td><td>Date of establishment</td></tr>
+<tr><td>Datum zániku</td><td>Date of deletion</td></tr>
+<tr><td>Statutární orgán / jednatel</td><td>Statutory body / managing director</td></tr>
+<tr><td>Společníci</td><td>Shareholders (of an s.r.o.)</td></tr>
+<tr><td>Spisová značka</td><td>File number in the public register</td></tr>
+<tr><td>Předmět podnikání</td><td>Line of business</td></tr>
+</table>
+<h2>What ARES does not tell you</h2>
+<p>ARES shows who the company is. For VAT reliability and bank accounts use the {L_REG}; for insolvency use {G('czech-insolvency-register-isir-english', 'ISIR')}. Address, director or name changes can be a sign of trouble, see {G('czech-company-in-liquidation', 'liquidation')}.</p>
+{ALERT}
+{CTA}
+{src(L_ARES, L_OR, L_REG)}
+{DISCLAIMER}""", 'ARES in English')
+
+# ---------- Guide 12 ----------
+guide('ico-vs-dic-czech-company-id-vat-number',
+ 'IČO vs DIČ: the Czech company ID and VAT number explained',
+ 'The difference between IČO (Czech company identification number) and DIČ (tax and VAT number), how they relate for companies, and how to find one from the other.',
+ f"""<h1>IČO vs DIČ: the Czech company ID and VAT number</h1>
+{meta(3)}
+<table>
+<tr><th></th><th>IČO</th><th>DIČ</th></tr>
+<tr><td>What it is</td><td>Identification number of a person or business</td><td>Tax identification number; used as the VAT number</td></tr>
+<tr><td>Format</td><td>8 digits, the last one a check digit</td><td>"CZ" followed by 8 to 10 digits</td></tr>
+<tr><td>Used for</td><td>Business registers (ARES, public register, ISIR)</td><td>VAT register, invoices, VIES</td></tr>
+</table>
+<h2>How they relate</h2>
+<p>For a legal entity the digits after "CZ" are normally the same as its IČO, unless the tax office assigned a special number. For an individual (sole trader) the DIČ is usually based on the birth number, not the IČO. This is how the {L_REGHELP} describes it.</p>
+<h2>Finding one from the other</h2>
+<ul>
+<li>Have the IČO? Look it up in {L_ARES}; the record shows the DIČ if one exists.</li>
+<li>Have the DIČ? Search it in the {L_REG}, or check it across the EU in {G('vies-vs-czech-vat-register', 'VIES')}.</li>
+</ul>
+<p>A company with an IČO but no DIČ in ARES is probably not a VAT payer. Then the {G(G109, '§109 rules')} on unreliable payers do not apply to purchases from it.</p>
+{CTA}
+{src(L_REGHELP, L_ARES, L_REG)}
+{DISCLAIMER}""", 'IČO vs DIČ')
+
+# ---------- Guide 13 ----------
+guide('vies-vs-czech-vat-register',
+ 'VIES vs the Czech VAT register: why foreign buyers need both',
+ 'VIES confirms that an EU VAT number is valid. The Czech VAT register also shows unreliable-payer status and published bank accounts. What each check tells you and when to use it.',
+ f"""<h1>VIES vs the Czech VAT register</h1>
+{meta(3)}
+<p>Companies outside the Czech Republic usually check a Czech supplier's VAT number in VIES, the European Commission's validation service. That is a useful check, but it answers a different question from the Czech register.</p>
+<table>
+<tr><th></th><th>VIES</th><th>Czech VAT register</th></tr>
+<tr><td>Run by</td><td>European Commission, querying national databases</td><td>Czech Financial Administration</td></tr>
+<tr><td>Tells you</td><td>Whether the VAT number is valid for cross-border EU trade, often with name and address</td><td>VAT payer status, <strong>unreliable payer</strong> status, <strong>published bank accounts</strong>, tax office</td></tr>
+<tr><td>Main use</td><td>Supporting zero-rated intra-EU supplies</td><td>Avoiding Czech {G(G109, '§109 VAT liability')}, checking accounts</td></tr>
+</table>
+<h2>When you need the Czech register</h2>
+<ul>
+<li>You are registered for Czech VAT and buy supplies taxed in the Czech Republic: §109 applies to you.</li>
+<li>You pay a Czech supplier and want to confirm the account is theirs: see {G('czech-published-bank-account-check', 'published bank accounts')}.</li>
+</ul>
+<p>Our {G(GFOREIGN, 'guide for foreign companies')} covers the wider picture.</p>
+{CTA}
+{src(L_VIES, L_REG, L_REGHELP, L_ZDPH)}
+{DISCLAIMER}""", 'VIES vs Czech register')
+
+# ---------- Guide 14 ----------
+guide('czech-supplier-due-diligence-checklist',
+ 'Czech supplier due diligence checklist: before the first order, before each payment, and ongoing',
+ 'A practical checklist for checking Czech suppliers in free official registers: ARES, the VAT register, ISIR, the public register and the ČOI risky e-shops list, with when to run each check.',
+ f"""<h1>Czech supplier due diligence checklist</h1>
+{meta(4)}
+<h2>Before the first order</h2>
+<table>
+<tr><th>Check</th><th>Where</th></tr>
+<tr><td>The company exists, the name and address match the contract</td><td>{L_ARES}</td></tr>
+<tr><td>Not in liquidation or deleted</td><td>{G('czech-company-in-liquidation', 'liquidation guide')}</td></tr>
+<tr><td>Who may sign for it (statutory body)</td><td>{L_OR}</td></tr>
+<tr><td>VAT payer and not unreliable</td><td>{L_REG}</td></tr>
+<tr><td>No insolvency proceedings</td><td>{L_ISIR}</td></tr>
+<tr><td>Website not on the risky e-shops list</td><td>{G('coi-risky-e-shops-list', 'ČOI list')}</td></tr>
+<tr><td>VAT number valid for EU trade (foreign buyers)</td><td>{G('vies-vs-czech-vat-register', 'VIES')}</td></tr>
+</table>
+<h2>Before each payment</h2>
+<ul>
+<li>Supplier still not unreliable ({G('czech-unreliable-vat-payer-list', 'how to check')}).</li>
+<li>The account on the invoice is published ({G('czech-published-bank-account-check', 'how to check')}).</li>
+<li>No unexplained change of bank details ({G('supplier-changed-bank-account-fraud', 'fraud guide')}).</li>
+</ul>
+<h2>Ongoing</h2>
+<ul>
+<li>New insolvency petitions, address, name or director changes.</li>
+<li>Keep a record of each check with its date.</li>
+</ul>
+<p>Running this by hand for many suppliers takes time. {G(GCHECK, 'Our step-by-step guide')} shows each register in detail.</p>
+{ALERT}
+{CTA}
+{src(L_ARES, L_OR, L_REG, L_ISIR, L_COI, L_VIES)}
+{DISCLAIMER}""", 'Due diligence checklist')
+
+# ---------- Guide 15 ----------
+guide('coi-risky-e-shops-list',
+ 'The ČOI risky e-shops list: unsafe Czech online shops explained',
+ 'What the Czech Trade Inspection Authority\'s list of risky e-shops (rizikové e-shopy) is, why websites are put on it, and how to check a site before you order.',
+ f"""<h1>The ČOI risky e-shops list</h1>
+{meta(3)}
+<p>The Czech Trade Inspection Authority (Česká obchodní inspekce, ČOI) publishes a list of websites it considers risky, mainly because they do not meet legal duties and consumer rights are hard to enforce against them.</p>
+<h2>Why a website gets on the list</h2>
+<p>According to ČOI, mainly for two reasons:</p>
+<ul>
+<li>The website gives no contact details of the seller, so it is not clear who runs it or who you have a contract with.</li>
+<li>The operator is known but based outside the EU, and the site lacks legally required information (such as terms), its terms grossly contradict the law, or ČOI has received many complaints about it.</li>
+</ul>
+<p>ČOI says the list is a recommendation to think carefully before buying, that it is updated regularly, and that it is not a complete list of risky shops. A site that is not on it is not automatically safe.</p>
+<h2>How to check</h2>
+<ol>
+<li>Open the {L_COI} page.</li>
+<li>Search for the website's domain.</li>
+<li>Also check who runs the site: a Czech seller should give its IČO, which you can look up in {G('ares-czech-business-register-english', 'ARES')}.</li>
+</ol>
+<p>Supplier Watch can watch a supplier's website and tell you if it is added to or removed from the list.</p>
+{CTA}
+{src(L_COI)}
+{DISCLAIMER}""", 'ČOI risky e-shops')
+
+# ---------- Guide 16 ----------
+guide('how-often-to-check-czech-supplier-vat-status',
+ 'How often should you check a Czech supplier\'s VAT status?',
+ 'Why the status that counts under Czech §109 is the one when VAT becomes due and when you pay, what that means for how often to check suppliers, and how to keep a record.',
+ f"""<h1>How often should you check a Czech supplier's VAT status?</h1>
+{meta(3)}
+<h2>The dates that matter</h2>
+<p>Under §109(1) of the VAT Act, the question is what you knew or should have known <strong>when the obligation to declare the VAT arose</strong>, and, where the VAT became due on supply, also <strong>when you paid</strong>. The presumptions in §109(2), such as an {G('czech-unreliable-vat-payer-list', 'unreliable payer')} or an {G('czech-published-bank-account-check', 'unpublished account')}, are tested at those moments.</p>
+<h2>What that means in practice</h2>
+<ul>
+<li>A check when you sign the contract is not enough.</li>
+<li>Check on the day of each payment, ideally right before the payment run.</li>
+<li>Keep a dated record (printout, screenshot or report) of each check.</li>
+</ul>
+<h2>Doing it without effort</h2>
+<p>The VAT register is updated daily. For a handful of suppliers a manual check before each payment works. For more, an automatic daily check with alerts saves time and gives you a dated record.</p>
+{ALERT}
+{CTA}
+{src(L_ZDPH, L_REG, L_FSUNREL)}
+{DISCLAIMER}""", 'How often to check')
+
+
 def write(rel, text):
     p = os.path.join(ROOT, rel); os.makedirs(os.path.dirname(p), exist_ok=True)
     open(p, 'w', encoding='utf-8').write(text)
 
+import json
+def article_ld(g):
+    d = {'@context': 'https://schema.org', '@type': 'Article', 'headline': g['title'][:110], 'description': g['desc'],
+         'dateModified': datetime.datetime.strptime(UPDATED, '%d %B %Y').date().isoformat(),
+         'author': {'@type': 'Organization', 'name': 'Supplier Watch CZ', 'url': BASE + '/'},
+         'mainEntityOfPage': BASE + '/guides/' + g['slug'] + '.html', 'inLanguage': 'en'}
+    return '<script type="application/ld+json">' + json.dumps(d, ensure_ascii=False).replace('</', '<\\/') + '</script>\n'
 for g in GUIDES:
-    write(f'guides/{g["slug"]}.html', page(g['slug'], g['title'], g['desc'].replace('"', '&quot;'), g['body'], f'/guides/{g["slug"]}.html'))
+    write(f'guides/{g["slug"]}.html', page(g['slug'], g['title'], g['desc'].replace('"', '&quot;'), g['body'], f'/guides/{g["slug"]}.html', script=article_ld(g)))
 idx = '<h1>Guides: checking Czech suppliers</h1><p>Plain-English guides to the Czech registers and the VAT rules that affect buyers.</p>' + ''.join(
     f'<h2><a href="/guides/{g["slug"]}.html">{g["title"]}</a></h2><p>{g["desc"]}</p>' for g in GUIDES) + CTA + DISCLAIMER
 write('guides/index.html', page('', 'Guides: checking Czech suppliers', 'Plain-English guides to Czech supplier checks: §109 VAT liability, ARES, the VAT register, ISIR, ČOI, and doing business with Czech suppliers as a foreign company.', idx, '/guides/'))
