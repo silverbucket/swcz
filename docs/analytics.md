@@ -1,6 +1,6 @@
 # Analytics (Matomo)
 
-Matomo site ID 9, ecommerce on, currency CZK. Cookieless: no consent banner, and the privacy policy's
+Matomo, with ecommerce on and currency CZK. Cookieless: no consent banner, and the privacy policy's
 "no tracking cookies" stays true.
 
 ## What is tracked
@@ -58,12 +58,12 @@ of at least 2 bytes, and "Regularly delete old raw data" older than 25 months (7
 ### 2. App environment
 
 ```
-MATOMO_URL=https://matomo.silverbucket.net   # server-side tracking; unset = off
-MATOMO_SITE_ID=9                 # default 9
-MATOMO_TOKEN=...                 # view access to site 9, for the first-touch lookup; unset = sign-up form only
+MATOMO_URL=https://matomo.example     # server-side tracking; unset = off
+MATOMO_SITE_ID=...                   # the Matomo site id
+MATOMO_TOKEN=...                     # view access to the site, for the first-touch lookup; unset = sign-up form only
 ```
 
-Create the token for a Matomo user that has only *view* access to site 9 (not the admin token used for the setup
+Create the token for a Matomo user that has only *view* access to the site (not the admin token used for the setup
 script below).
 
 ### 3. Stripe webhook
@@ -74,7 +74,7 @@ Add `invoice.paid` to the webhook's events (next to `checkout.session.completed`
 ### 4. Goals
 
 ```
-MATOMO_URL=https://matomo.silverbucket.net MATOMO_TOKEN=... node tools/matomo-setup.js
+MATOMO_URL=https://matomo.example MATOMO_SITE_ID=... MATOMO_TOKEN=... node tools/matomo-setup.js
 ```
 
 Creates the funnel goals (free check → sign-up submitted → email sent → confirmed → plan limit hit → upgrade
