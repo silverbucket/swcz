@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>IČO vs DIČ: the Czech company ID and VAT number explained | Supplier Watch CZ</title>
-<meta name="description" content="The difference between IČO (Czech company identification number) and DIČ (tax and VAT number), how they relate for companies, and how to find one from the other.">
+<meta name="description" content="The difference between IČO (Czech company identification number) and DIČ (tax and VAT number), how they relate for companies, how the IČO check digit works, and how to find one from the other.">
 <link rel="canonical" href="https://supplierwatch.cz/guides/ico-vs-dic-czech-company-id-vat-number.html">
 <style>:root{--ink:#14202b;--muted:#5b6875;--line:#e3e8ee;--bg:#f6f8fa;--brand:#0a7c5a}
 *{box-sizing:border-box}body{margin:0;font:17px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink)}
@@ -24,22 +24,27 @@ pre{background:#f1f3f5;border-radius:8px;padding:12px 14px;overflow:auto;font-si
 <header class="top"><div class="wrap"><a class="logo" href="/">Supplier Watch <span>CZ</span></a><nav><a href="/#checks">What we check</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><!--if monitoring--><a href="/#pricing">Pricing</a><!--end--></nav></div></header>
 <main class="wrap">
 <h1>IČO vs DIČ: the Czech company ID and VAT number</h1>
-<p class="meta">Updated 22 October 2026 · about 3 minutes</p>
+<p class="meta">Updated 22 October 2026 · about 4 minutes</p>
+<p>Czech invoices and contracts carry two numbers that look alike and are easy to mix up. The IČO identifies the business in the company registers. The DIČ identifies it to the tax office and doubles as the VAT number. Here is how they differ, how they relate, and how to check one.</p>
 <table>
 <tr><th></th><th>IČO</th><th>DIČ</th></tr>
 <tr><td>What it is</td><td>Identification number of a person or business</td><td>Tax identification number; used as the VAT number</td></tr>
 <tr><td>Format</td><td>8 digits, the last one a check digit</td><td>"CZ" followed by 8 to 10 digits</td></tr>
 <tr><td>Used for</td><td>Business registers (ARES, public register, ISIR)</td><td>VAT register, invoices, VIES</td></tr>
 </table>
-<h2>How they relate</h2>
+<h2>How IČO and DIČ relate</h2>
 <p>For a legal entity the digits after "CZ" are normally the same as its IČO, unless the tax office assigned a special number. For an individual (sole trader) the DIČ is usually based on the birth number, not the IČO. This is how the <a href="https://adisspr.mfcr.cz/adis/idph/a_napo_i_dph.htm" rel="noopener">VAT register help in English</a> describes it.</p>
-<h2>Finding one from the other</h2>
+<h2>How the IČO check digit works (modulo 11)</h2>
+<p>You can spot a mistyped IČO without any register. Multiply the first seven digits by the weights 8, 7, 6, 5, 4, 3, 2, add the products, and take the remainder after dividing by 11. The check digit is 11 minus that remainder; if the result is 10 the check digit is 0, and if it is 11 the check digit is 1.</p>
+<p>Example with the IČO 28948491: 2×8 + 8×7 + 9×6 + 4×5 + 8×4 + 4×3 + 9×2 = 208. 208 divided by 11 leaves remainder 10. 11 − 10 = 1, which matches the last digit. An IČO that fails this test was copied wrongly, so check the invoice before you search.</p>
+<h2>Finding one number from the other</h2>
 <ul>
 <li>Have the IČO? Look it up in <a href="https://ares.gov.cz/" rel="noopener">ARES, Ministry of Finance</a>; the record shows the DIČ if one exists.</li>
 <li>Have the DIČ? Search it in the <a href="https://adisspr.mfcr.cz/dpr/DphReg" rel="noopener">VAT register (Registr plátců DPH), Financial Administration</a>, or check it across the EU in <a href="/guides/vies-vs-czech-vat-register.html">VIES</a>.</li>
 </ul>
 <p>A company with an IČO but no DIČ in ARES is probably not a VAT payer. Then the <a href="/guides/czech-vat-liability-unreliable-payer-bank-accounts.html">§109 rules</a> on unreliable payers do not apply to purchases from it.</p>
 <div class="box"><p><strong>Check a supplier now, free:</strong> enter an IČO and see its VAT status, published bank accounts, insolvency record and register entry in one go.</p><p><a class="cta" href="/check.html">Check one IČO</a><!--if monitoring--> &nbsp; or <a href="/#signup">get daily alerts for up to 5 suppliers free</a><!--end--></p></div>
+<h2>Frequently asked questions</h2><h3>Can I work out a sole trader’s DIČ from their IČO?</h3><p>No. A sole trader’s DIČ is normally derived from the birth number, which is personal data and not in the registers. Ask the supplier, or search the VAT register by name.</p><h3>Is every DIČ a VAT number?</h3><p>No. Any registered taxpayer can have a DIČ, including businesses that are not VAT payers. Only VAT payers and identified persons appear in the VAT register, and only VAT payers validate in VIES.</p><h3>Do I type the "CZ" prefix when searching?</h3><p>In VIES, yes: choose CZ and enter the digits. In the Czech VAT register, enter the digits without "CZ".</p>
 <h2>Official sources</h2><ul><li><a href="https://adisspr.mfcr.cz/adis/idph/a_napo_i_dph.htm" rel="noopener">VAT register help in English</a></li><li><a href="https://ares.gov.cz/" rel="noopener">ARES, Ministry of Finance</a></li><li><a href="https://adisspr.mfcr.cz/dpr/DphReg" rel="noopener">VAT register (Registr plátců DPH), Financial Administration</a></li></ul>
 <p class="box muted"><strong>Not legal or tax advice.</strong> This guide is general information about public Czech registers and the law as we understand it on the date shown. Laws and court practice change; for a decision about a specific transaction, ask a Czech tax adviser (daňový poradce) or lawyer.</p>
 <h2>More guides</h2><ul><li><a href="/guides/czech-vat-liability-unreliable-payer-bank-accounts.html">VAT liability (§109)</a></li><li><a href="/guides/how-to-check-a-czech-supplier.html">How to check a supplier</a></li><li><a href="/guides/doing-business-with-czech-suppliers.html">Guide for foreign companies</a></li><li><a href="/guides/czech-unreliable-vat-payer-list.html">Unreliable payer list</a></li><li><a href="/guides/supplier-became-unreliable-vat-payer.html">Supplier became unreliable</a></li><li><a href="/guides/pay-vat-for-supplier-czech-109a.html">Paying VAT for a supplier (§109a)</a></li><li><a href="/guides/czech-published-bank-account-check.html">Published bank accounts</a></li><li><a href="/guides/supplier-changed-bank-account-fraud.html">Bank-account change fraud</a></li><li><a href="/guides/czech-insolvency-register-isir-english.html">Insolvency register (ISIR)</a></li><li><a href="/guides/czech-company-in-liquidation.html">Liquidation and deletion</a></li><li><a href="/guides/ares-czech-business-register-english.html">ARES in English</a></li><li><a href="/guides/ico-vs-dic-czech-company-id-vat-number.html">IČO vs DIČ</a></li><li><a href="/guides/vies-vs-czech-vat-register.html">VIES vs Czech register</a></li><li><a href="/guides/czech-supplier-due-diligence-checklist.html">Due diligence checklist</a></li><li><a href="/guides/coi-risky-e-shops-list.html">ČOI risky e-shops</a></li><li><a href="/guides/how-often-to-check-czech-supplier-vat-status.html">How often to check</a></li></ul>
@@ -48,7 +53,7 @@ pre{background:#f1f3f5;border-radius:8px;padding:12px 14px;overflow:auto;font-si
 <a href="/">Home</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><a href="/about.html">About</a><a href="/sources.html">Data sources</a><!--if monitoring--><a href="/api.html">API</a><!--end--><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a><a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>
 <p style="margin:12px 0 0">Supplier Watch CZ is an independent service. It is not affiliated with the Czech Financial Administration, the Ministry of Justice or ČOI.</p>
 </div></footer>
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Article", "headline": "IČO vs DIČ: the Czech company ID and VAT number explained", "description": "The difference between IČO (Czech company identification number) and DIČ (tax and VAT number), how they relate for companies, and how to find one from the other.", "dateModified": "2026-10-22", "author": {"@type": "Organization", "name": "Supplier Watch CZ", "url": "https://supplierwatch.cz/"}, "mainEntityOfPage": "https://supplierwatch.cz/guides/ico-vs-dic-czech-company-id-vat-number.html", "inLanguage": "en"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Article", "headline": "IČO vs DIČ: the Czech company ID and VAT number explained", "description": "The difference between IČO (Czech company identification number) and DIČ (tax and VAT number), how they relate for companies, how the IČO check digit works, and how to find one from the other.", "dateModified": "2026-10-22", "author": {"@type": "Person", "name": "Nicholas Kossow Jennings", "url": "https://supplierwatch.cz/about.html"}, "publisher": {"@type": "Organization", "name": "Supplier Watch CZ", "url": "https://supplierwatch.cz/"}, "mainEntityOfPage": "https://supplierwatch.cz/guides/ico-vs-dic-czech-company-id-vat-number.html", "inLanguage": "en"}</script>
 <script src="/analytics.js" defer></script>
 </body>
 </html>
