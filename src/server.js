@@ -29,7 +29,33 @@ export const ACCOUNTANT_TEST_LINK = 'https://buy.stripe.com/test_14AdR92KNeiL730
 export const CONSENT_TEXT = 'I agree to the Terms and the Privacy Policy and consent to receiving supplier alert emails. / Souhlasím s Podmínkami a Zásadami ochrany osobních údajů a se zasíláním upozornění e-mailem.';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 /** HTML page shell. `track` is page data for site/analytics.js: { userId, title, events, plansView, notFound }. */
-const page = (title, body, track = {}) => `<!doctype html><html lang="en"><head><meta charset="utf-8">${title.startsWith('Check a Czech') ? '<meta name="description" content="Free check of a Czech company by IČO: unreliable VAT payer status, published bank accounts, insolvency (ISIR), ARES and the ČOI risky e-shop list. No account needed."><link rel="canonical" href="https://supplierwatch.cz/check.html">' : /^(terms|privacy)$/.test(title) ? '' : '<meta name="robots" content="noindex">'}<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} - Supplier Watch CZ</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem}textarea{width:100%}.sw-row{display:flex;gap:.5rem;margin:.3rem 0}.sw-row input{flex:1;padding:.3rem}.sw-bad{border-color:#c00!important;background:#fff4f4}.sw-err{color:#c00;font-size:.9em}.muted{color:#666}.sw-row input{min-width:0}.cta{display:inline-block;padding:.4rem .9rem;background:#0b5;color:#fff;border-radius:4px;text-decoration:none;margin:.2rem}table.t{border-collapse:collapse;width:100%;font-size:.92em}table.t td,table.t th{border-bottom:1px solid #ddd;padding:.3rem .4rem;text-align:left;vertical-align:top}.box{background:#f6f8fa;border-radius:8px;padding:.6rem 1rem;margin:1rem 0}code{background:#f1f3f5;padding:.1rem .3rem;border-radius:3px;word-break:break-all}</style></head><body><p><a href="/">Supplier Watch CZ</a></p>${body}${analyticsData(track)}${ANALYTICS_SCRIPT}</body></html>`;
+// Same look as the static pages (index.html, tools/build_guides.py): header, a centred column, footer.
+const PAGE_CSS = `:root{--ink:#14202b;--muted:#5b6875;--line:#e3e8ee;--bg:#f6f8fa;--brand:#0a7c5a;--brand-d:#07614a;--warn:#b4441f}
+*{box-sizing:border-box}body{margin:0;font:17px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:#fff}
+a{color:var(--brand)}.wrap{max-width:760px;margin:0 auto;padding:0 20px}
+header.top{border-bottom:1px solid var(--line)}header.top .wrap{display:flex;justify-content:space-between;align-items:center;height:60px;max-width:1040px}
+.logo{font-weight:700;color:var(--ink);text-decoration:none;letter-spacing:-.01em}.logo span{color:var(--brand)}.top nav a{color:var(--muted);text-decoration:none;margin-left:18px;font-size:15px}
+main.wrap{padding-bottom:24px}h1{font-size:clamp(28px,4vw,40px);line-height:1.15;letter-spacing:-.02em;margin:40px 0 12px}h2{margin:36px 0 10px;font-size:24px;letter-spacing:-.01em}
+.lead{font-size:19px;color:var(--muted);margin:0 0 24px}.muted{color:var(--muted);font-size:15px}
+.cta,button{display:inline-block;background:var(--brand);color:#fff;text-decoration:none;font:inherit;font-weight:600;padding:12px 22px;border-radius:8px;border:0;cursor:pointer}
+.cta{margin:0 10px 6px 0}.cta:hover,button:hover{background:var(--brand-d)}button.sw-add,button.sw-del,button.sw-parse,.sw-paste button{background:#fff;color:var(--brand);border:1.5px solid var(--brand);padding:8px 14px;font-weight:600}
+input,textarea,select{font:inherit;padding:10px 12px;border:1px solid #c9d2dc;border-radius:8px;background:#fff;max-width:100%}textarea{width:100%;min-height:120px}
+input:focus,textarea:focus{outline:2px solid var(--brand);outline-offset:1px}
+.sw-row{display:flex;gap:8px;margin:0 0 8px}.sw-row input{flex:1 1 0;min-width:0}.sw-row input[name=ico]{flex:0 0 11em}.sw-del{flex:none}
+.sw-bad{border-color:#c00!important;background:#fff4f4!important}.sw-err{color:var(--warn);font-size:15px}
+.panel{background:var(--bg);border-radius:14px;padding:24px;margin:0 0 20px}.panel label{display:block;font-weight:600;margin:0 0 6px}.panel .hint{color:var(--muted);font-size:14px;margin:6px 0 16px}
+.box{background:var(--bg);border-radius:12px;padding:18px 22px;margin:24px 0}
+.verdict{border-radius:12px;padding:16px 20px;margin:8px 0 24px;font-size:18px}.verdict.ok{background:#e4f3ec;color:var(--brand-d)}.verdict.bad{background:#fbeae4;color:var(--warn)}.verdict ul{margin:6px 0 0;padding-left:20px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;padding:0;margin:0 0 24px;list-style:none}.chips li{background:#e4f3ec;color:var(--brand-d);border-radius:999px;padding:4px 12px;font-size:14px;font-weight:600}
+table{border-collapse:collapse;width:100%;font-size:16px}td,th{border-bottom:1px solid var(--line);padding:10px 8px;text-align:left;vertical-align:top}th{color:var(--muted);font-weight:600;width:38%}
+code{background:#f1f3f5;padding:1px 4px;border-radius:3px;word-break:break-all}
+footer{border-top:1px solid var(--line);margin-top:56px;padding:28px 0;color:var(--muted);font-size:15px}footer a{color:var(--muted);margin-right:16px}
+@media (max-width:760px){.top nav{display:none}.sw-row{flex-wrap:wrap}.sw-row input[name=ico]{flex:1 1 100%}}`;
+const page = (title, body, track = {}) => `<!doctype html><html lang="en"><head><meta charset="utf-8">${title.startsWith('Check a Czech') ? '<meta name="description" content="Free check of a Czech company by IČO: unreliable VAT payer status, published bank accounts, insolvency (ISIR), ARES and the ČOI risky e-shop list. No account needed."><link rel="canonical" href="https://supplierwatch.cz/check.html">' : /^(terms|privacy)$/.test(title) ? '' : '<meta name="robots" content="noindex">'}<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} - Supplier Watch CZ</title><style>${PAGE_CSS}</style></head><body>
+<header class="top"><div class="wrap"><a class="logo" href="/">Supplier Watch <span>CZ</span></a><nav><a href="/#checks">What we check</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a></nav></div></header>
+<main class="wrap">${body}</main>
+<footer><div class="wrap"><a href="/">Home</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><a href="/about.html">About</a><a href="/sources.html">Data sources</a><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a><a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a></div></footer>
+${analyticsData(track)}${ANALYTICS_SCRIPT}</body></html>`;
 const row = (ico = '', web = '') => `<div class="sw-row"><input name="ico" inputmode="numeric" maxlength="10" placeholder="IČO (8 digits)" aria-label="IČO" value="${esc(ico)}"><input name="web" placeholder="website (optional), e.g. firma.cz" aria-label="Website (optional)" value="${esc(web)}"><button type="button" class="sw-del" aria-label="Remove">×</button></div>`;
 /** Structured supplier rows (enhanced by /suppliers.js) with a collapsible paste box. Works without JS. */
 export function supplierFields(icos = [], websites = {}, limit = 5) {
@@ -75,7 +101,7 @@ export function createServer({
     const mailLimit = new RateLimiter({ perIp: Number(env.MAIL_FORM_PER_IP || 10), global: Number(env.MAIL_FORM_GLOBAL || 300), now });
     const tooMany = (send) => send(429, page('Too many requests', '<p>Too many requests from your network. Please try again in an hour. / Příliš mnoho požadavků, zkuste to prosím za hodinu.</p>'));
     const unsubUrl = (a) => `${baseUrl}/unsubscribe?t=${a.unsubToken}`;
-    const pausedHtml = page('Monitoring paused', `<h1>Monitoring is paused / Sledování je pozastaveno</h1><p>Ongoing monitoring is currently paused. The free one-off check is available.<br>Průběžné sledování je momentálně pozastaveno. Jednorázová bezplatná kontrola je dostupná.</p><p><a class="cta" href="/check.html">Check a supplier free / Ověřit dodavatele</a> <a href="/#updates">Get updates / Novinky e-mailem</a></p>`, { events: [['Account', 'paused-page']] });
+    const pausedHtml = page('Check a supplier free', `<h1>Check a supplier free / Ověřte dodavatele zdarma</h1><p>Supplier Watch checks any Czech supplier by IČO in the official registers, free and without an account.<br>Supplier Watch zdarma a bez registrace ověří libovolného českého dodavatele podle IČO v oficiálních registrech.</p><p><a class="cta" href="/check.html">Check a supplier free / Ověřit dodavatele</a> <a href="/#updates">Get updates / Novinky e-mailem</a></p>`, { events: [['Account', 'paused-page']] });
     const checkoutUrl = (a, plan) => `${links[plan]}?client_reference_id=${encodeURIComponent(a.id)}&prefilled_email=${encodeURIComponent(a.email)}`;
     const SCRIPTS = '<script src="/csvimport.js"></script><script src="/suppliers.js"></script>';
     const hidden = (t, extra = {}) => `<input type="hidden" name="t" value="${esc(t)}">${Object.entries(extra).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('')}`;
@@ -172,7 +198,7 @@ ${reportsHtml(a, t, c.id)}
             return send(200, JSON.stringify({ ok: true, version: VERSION, monitoring: on, sources: st ? { checkedAt: st.checkedAt, ok: st.ok, failed: st.failed, detail: st.sources } : null, health: h ? { checkedAt: h.checkedAt, ok: h.ok, failed: h.failed, detail: h.probes } : null }), 'application/json');
         }
         if (P === '/api' || P.startsWith('/api/')) {
-            const r = on ? await handleApi(req, url) : { status: 503, headers: {}, body: { error: { code: 'paused', message: 'Ongoing monitoring and the API are paused.' } } };
+            const r = on ? await handleApi(req, url) : { status: 503, headers: {}, body: { error: { code: 'paused', message: 'The API is not available.' } } };
             res.writeHead(r.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...r.headers });
             return res.end(req.method === 'HEAD' ? undefined : JSON.stringify(r.body));
         }
@@ -210,7 +236,7 @@ ${reportsHtml(a, t, c.id)}
             const r = !up.get(email)?.confirmed_at && !cooldown('updates', email) ? up.request(email) : {};
             if (r.confirmToken) {
                 await mailer.send({ to: email, unsubscribeUrl: `${baseUrl}/unsubscribe?u=${r.unsub}`, subject: 'Confirm Supplier Watch updates / Potvrďte odběr novinek',
-                    text: `Please confirm that you want occasional emails about Supplier Watch updates, for example when daily supplier monitoring is back (link valid 48 hours):\nPotvrďte prosím, že chcete dostávat občasné e-maily o novinkách Supplier Watch, například až se vrátí denní sledování dodavatelů (odkaz platí 48 hodin):\n\n${baseUrl}/confirm?u=${r.confirmToken}\n\nIf you did not ask for this, ignore this email. / Pokud jste o to nežádali, e-mail ignorujte.` });
+                    text: `Please confirm that you want occasional emails about Supplier Watch updates, for example when daily supplier monitoring launches (link valid 48 hours):\nPotvrďte prosím, že chcete dostávat občasné e-maily o novinkách Supplier Watch, například až spustíme denní sledování dodavatelů (odkaz platí 48 hodin):\n\n${baseUrl}/confirm?u=${r.confirmToken}\n\nIf you did not ask for this, ignore this email. / Pokud jste o to nežádali, e-mail ignorujte.` });
             }
             return done();
         }

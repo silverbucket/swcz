@@ -1,4 +1,4 @@
-// Updates list: people who want an email when monitoring is back or something new launches. Double opt-in, one row per
+// Updates list: people who want an email when daily monitoring or something else new launches. Double opt-in, one row per
 // address in accounts.db; an unsubscribe deletes the row, unconfirmed requests go after 7 days (daily run).
 // Sign-ups for monitoring that tick the updates box are added confirmed when they confirm their account.
 import crypto from 'node:crypto';
