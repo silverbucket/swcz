@@ -85,7 +85,7 @@ ${stale ? `<p class="sw-err">A register did not answer just now, so this shows t
 <div data-track-content data-content-name="Free check: watch CTA">${monitoring ? `<h2>Get an email when this changes</h2>
 <p>A supplier can become an unreliable VAT payer, change its bank accounts or enter insolvency at any time. Supplier Watch checks your suppliers every morning and emails you only when something changes. Free for up to 5 suppliers.</p>
 <p><a class="cta" href="/#signup">Watch this supplier for free</a> <a href="/check.html">Check another IČO</a> · <a href="/guides/">Guides</a></p>` : `<h2>Want to know when this changes?</h2>
-<p>A supplier can become an unreliable VAT payer, change its bank accounts or enter insolvency at any time. Ongoing monitoring is paused for now; leave your email and we'll tell you when daily checks are back.</p>
+<p>A supplier can become an unreliable VAT payer, change its bank accounts or enter insolvency at any time. We're working on daily monitoring that emails you when something changes; leave your email and we'll tell you when it's ready.</p>
 <p><a class="cta" href="/#updates">Get updates</a> <a href="/check.html">Check another IČO</a> · <a href="/guides/">Guides</a></p>`}</div>`;
 }
 

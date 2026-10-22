@@ -39,7 +39,7 @@ test('pages: the paused variant drops sign-up, pricing, plans and API links; the
         assert.match(on.split('<footer')[1], /href="\/api.html"/, f);
     }
     const off = sitePage(site('index.html'), false); const on = sitePage(site('index.html'), true);
-    assert.match(off, /Ongoing monitoring is currently paused\. The free one-off check is available\./);
+    assert.match(off, /No account, no card/);
     assert.match(off, /id="updates"[\s\S]*action="\/signup"[\s\S]*name="updates" value="1"[\s\S]*name="consent"/);
     assert.match(off, /href="\/check.html"/);
     assert.doesNotMatch(on, /id="updates"|name="updates"/);
@@ -66,7 +66,7 @@ test('paused: sign-up, confirm, manage, billing and the API answer "paused"; fre
         const a = makeAccount(dataDir, 'old@firma.cz', { icos: ['27082440'] });
         assert.match(await (await fetch(`${url}/`)).text(), /name="updates"/);
         const s = await post(`${url}/signup`, { email: 'x@firma.cz', consent: 'yes', ico: '27082440' });
-        assert.equal(s.status, 503); assert.match(await s.text(), /Monitoring is paused/);
+        assert.equal(s.status, 503); assert.match(await s.text(), /Check a supplier free/);
         assert.equal(accounts(dataDir).byEmail('x@firma.cz'), null);
         for (const [m, p] of [['GET', '/manage?t=x'], ['POST', '/manage'], ['POST', '/manage-link'], ['POST', '/billing'], ['GET', '/confirm?t=x'], ['POST', '/confirm?t=x']]) assert.equal((await fetch(`${url}${p}`, { method: m, body: m === 'POST' ? 'email=old%40firma.cz' : undefined })).status, 503, `${m} ${p}`);
         const api = await fetch(`${url}/api/v1/suppliers`, { headers: { authorization: 'Bearer sw_x' } });

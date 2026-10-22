@@ -75,7 +75,7 @@ export function createServer({
     const mailLimit = new RateLimiter({ perIp: Number(env.MAIL_FORM_PER_IP || 10), global: Number(env.MAIL_FORM_GLOBAL || 300), now });
     const tooMany = (send) => send(429, page('Too many requests', '<p>Too many requests from your network. Please try again in an hour. / Příliš mnoho požadavků, zkuste to prosím za hodinu.</p>'));
     const unsubUrl = (a) => `${baseUrl}/unsubscribe?t=${a.unsubToken}`;
-    const pausedHtml = page('Monitoring paused', `<h1>Monitoring is paused / Sledování je pozastaveno</h1><p>Ongoing monitoring is currently paused. The free one-off check is available.<br>Průběžné sledování je momentálně pozastaveno. Jednorázová bezplatná kontrola je dostupná.</p><p><a class="cta" href="/check.html">Check a supplier free / Ověřit dodavatele</a> <a href="/#updates">Get updates / Novinky e-mailem</a></p>`, { events: [['Account', 'paused-page']] });
+    const pausedHtml = page('Check a supplier free', `<h1>Check a supplier free / Ověřte dodavatele zdarma</h1><p>Supplier Watch checks any Czech supplier by IČO in the official registers, free and without an account.<br>Supplier Watch zdarma a bez registrace ověří libovolného českého dodavatele podle IČO v oficiálních registrech.</p><p><a class="cta" href="/check.html">Check a supplier free / Ověřit dodavatele</a> <a href="/#updates">Get updates / Novinky e-mailem</a></p>`, { events: [['Account', 'paused-page']] });
     const checkoutUrl = (a, plan) => `${links[plan]}?client_reference_id=${encodeURIComponent(a.id)}&prefilled_email=${encodeURIComponent(a.email)}`;
     const SCRIPTS = '<script src="/csvimport.js"></script><script src="/suppliers.js"></script>';
     const hidden = (t, extra = {}) => `<input type="hidden" name="t" value="${esc(t)}">${Object.entries(extra).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('')}`;
@@ -172,7 +172,7 @@ ${reportsHtml(a, t, c.id)}
             return send(200, JSON.stringify({ ok: true, version: VERSION, monitoring: on, sources: st ? { checkedAt: st.checkedAt, ok: st.ok, failed: st.failed, detail: st.sources } : null, health: h ? { checkedAt: h.checkedAt, ok: h.ok, failed: h.failed, detail: h.probes } : null }), 'application/json');
         }
         if (P === '/api' || P.startsWith('/api/')) {
-            const r = on ? await handleApi(req, url) : { status: 503, headers: {}, body: { error: { code: 'paused', message: 'Ongoing monitoring and the API are paused.' } } };
+            const r = on ? await handleApi(req, url) : { status: 503, headers: {}, body: { error: { code: 'paused', message: 'The API is not available.' } } };
             res.writeHead(r.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...r.headers });
             return res.end(req.method === 'HEAD' ? undefined : JSON.stringify(r.body));
         }
@@ -210,7 +210,7 @@ ${reportsHtml(a, t, c.id)}
             const r = !up.get(email)?.confirmed_at && !cooldown('updates', email) ? up.request(email) : {};
             if (r.confirmToken) {
                 await mailer.send({ to: email, unsubscribeUrl: `${baseUrl}/unsubscribe?u=${r.unsub}`, subject: 'Confirm Supplier Watch updates / Potvrďte odběr novinek',
-                    text: `Please confirm that you want occasional emails about Supplier Watch updates, for example when daily supplier monitoring is back (link valid 48 hours):\nPotvrďte prosím, že chcete dostávat občasné e-maily o novinkách Supplier Watch, například až se vrátí denní sledování dodavatelů (odkaz platí 48 hodin):\n\n${baseUrl}/confirm?u=${r.confirmToken}\n\nIf you did not ask for this, ignore this email. / Pokud jste o to nežádali, e-mail ignorujte.` });
+                    text: `Please confirm that you want occasional emails about Supplier Watch updates, for example when daily supplier monitoring launches (link valid 48 hours):\nPotvrďte prosím, že chcete dostávat občasné e-maily o novinkách Supplier Watch, například až spustíme denní sledování dodavatelů (odkaz platí 48 hodin):\n\n${baseUrl}/confirm?u=${r.confirmToken}\n\nIf you did not ask for this, ignore this email. / Pokud jste o to nežádali, e-mail ignorujte.` });
             }
             return done();
         }

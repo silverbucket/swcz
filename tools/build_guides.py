@@ -146,7 +146,7 @@ guide('how-to-check-a-czech-supplier',
 </table>
 
 <h2>Doing it automatically</h2>
-<p>Checking by hand works for one supplier. For a list of suppliers, the hard part is noticing when something changes.<!--if monitoring--> Supplier Watch runs all of these checks every morning and emails you only when a status, an address, a bank account or an insolvency record changes. Free for up to 5 suppliers.<!--end--><!--if paused--> The <a href="/check.html">free Supplier Watch check</a> runs all of these checks for one IČO in one go; ongoing monitoring is paused for now (<a href="/#updates">get updates</a>).<!--end--></p>
+<p>Checking by hand works for one supplier. For a list of suppliers, the hard part is noticing when something changes.<!--if monitoring--> Supplier Watch runs all of these checks every morning and emails you only when a status, an address, a bank account or an insolvency record changes. Free for up to 5 suppliers.<!--end--><!--if paused--> The <a href="/check.html">free Supplier Watch check</a> runs all of these checks for one IČO in one go, without an account.<!--end--></p>
 {CTA}
 {DISCLAIMER}""", 'How to check a supplier')
 
@@ -208,7 +208,7 @@ write('guides/index.html', page('', 'Guides: checking Czech suppliers', 'Plain-E
 
 # ---------- Trust pages (About, Sources, API) ----------
 ABOUT = """<h1>About Supplier Watch</h1>
-<!--if monitoring--><p>Supplier Watch CZ checks Czech suppliers every morning in the official public registers and emails you, in English with the Czech wording alongside, only when something changes. Each month you also get a PDF report of every check, which you can keep as evidence that you checked your suppliers.</p><!--end--><!--if paused--><p>Supplier Watch CZ checks Czech suppliers in the official public registers, in English with the Czech wording alongside. The <a href="/check.html">free one-off check</a> is available; ongoing daily monitoring is currently paused.</p><!--end-->
+<!--if monitoring--><p>Supplier Watch CZ checks Czech suppliers every morning in the official public registers and emails you, in English with the Czech wording alongside, only when something changes. Each month you also get a PDF report of every check, which you can keep as evidence that you checked your suppliers.</p><!--end--><!--if paused--><p>Supplier Watch CZ checks Czech suppliers in the official public registers, in English with the Czech wording alongside. Look up any supplier with the <a href="/check.html">free check</a>, no account needed.</p><!--end-->
 <h2>Who runs it</h2>
 <table>
 <tr><th>Operator</th><td>Nicholas Kossow Jennings, sole trader (fyzická osoba podnikající)</td></tr>
