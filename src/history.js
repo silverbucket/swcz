@@ -60,9 +60,8 @@ export function historyMonths(dataDir, accountId) {
     const d = dirFor(dataDir, accountId); if (!fs.existsSync(d)) return [];
     return fs.readdirSync(d).map((f) => f.match(/^(\d{4}-\d{2})\.jsonl$/)?.[1]).filter(Boolean).sort().reverse();
 }
-/** Remove every file of an account: list snapshots, check history, monthly PDFs, daily report files, and outbox mail to `emails`. */
-export function deleteAccountFiles(dataDir, accountId, emails = []) {
-    const id = String(accountId).replace(/[^\w-]/g, ''); if (!id) return;
+/** Remove outbox mail (and its attachments) addressed to any of `emails`. */
+export function deleteOutboxMail(dataDir, emails = []) {
     const outbox = path.join(dataDir, 'outbox'); // dry-run mail (mailer.js): <ms>-<rand>.json plus <ms>-<rand>-<n>-<file> attachments
     if (emails.length && fs.existsSync(outbox)) for (const f of fs.readdirSync(outbox)) {
         if (!f.endsWith('.json')) continue;
@@ -71,6 +70,11 @@ export function deleteAccountFiles(dataDir, accountId, emails = []) {
         for (const a of m.attachments ?? []) if (a.file) fs.rmSync(path.join(outbox, path.basename(a.file)), { force: true });
         fs.rmSync(path.join(outbox, f), { force: true });
     }
+}
+/** Remove every file of an account: list snapshots, check history, monthly PDFs, daily report files, and outbox mail to `emails`. */
+export function deleteAccountFiles(dataDir, accountId, emails = []) {
+    const id = String(accountId).replace(/[^\w-]/g, ''); if (!id) return;
+    deleteOutboxMail(dataDir, emails);
     for (const sub of ['history', 'monthly']) fs.rmSync(path.join(dataDir, sub, id), { recursive: true, force: true });
     for (const sub of ['state', 'reports']) { // <id>.json, <id>--<client>.json, <id>-<date>.txt ...
         const d = path.join(dataDir, sub); if (!fs.existsSync(d)) continue;

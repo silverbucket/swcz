@@ -18,7 +18,7 @@ pre{background:#f1f3f5;border-radius:8px;padding:12px 14px;overflow:auto;font-si
 .ok{color:#0a7c5a;font-weight:600}.bad{color:#b4441f;font-weight:600}
 @media (max-width:760px){.top nav{display:none}}"""
 DISCLAIMER = '<p class="box muted"><strong>Not legal or tax advice.</strong> This guide is general information about public Czech registers and the law as we understand it on the date shown. Laws and court practice change; for a decision about a specific transaction, ask a Czech tax adviser (daňový poradce) or lawyer.</p>'
-CTA = '<div class="box"><p><strong>Check a supplier now, free:</strong> enter an IČO and see its VAT status, published bank accounts, insolvency record and register entry in one go.</p><p><a class="cta" href="/check.html">Check one IČO</a> &nbsp; or <a href="/#signup">get daily alerts for up to 5 suppliers free</a></p></div>'
+CTA = '<div class="box"><p><strong>Check a supplier now, free:</strong> enter an IČO and see its VAT status, published bank accounts, insolvency record and register entry in one go.</p><p><a class="cta" href="/check.html">Check one IČO</a><!--if monitoring--> &nbsp; or <a href="/#signup">get daily alerts for up to 5 suppliers free</a><!--end--></p></div>'
 
 GUIDES = []
 def guide(slug, title, desc, body, short):
@@ -37,13 +37,13 @@ def page(path, title, desc, body, canonical, more=True, script=''):
 <style>{CSS}</style>
 </head>
 <body>
-<header class="top"><div class="wrap"><a class="logo" href="/">Supplier Watch <span>CZ</span></a><nav><a href="/#checks">What we check</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><a href="/#pricing">Pricing</a></nav></div></header>
+<header class="top"><div class="wrap"><a class="logo" href="/">Supplier Watch <span>CZ</span></a><nav><a href="/#checks">What we check</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><!--if monitoring--><a href="/#pricing">Pricing</a><!--end--></nav></div></header>
 <main class="wrap">
 {body}
 {('<h2>More guides</h2><ul>' + nav + '</ul>') if more else ''}
 </main>
 <footer><div class="wrap">
-<a href="/">Home</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><a href="/about.html">About</a><a href="/sources.html">Data sources</a><a href="/api.html">API</a><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a><a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>
+<a href="/">Home</a><a href="/guides/">Guides</a><a href="/check.html">Free IČO check</a><a href="/about.html">About</a><a href="/sources.html">Data sources</a><!--if monitoring--><a href="/api.html">API</a><!--end--><a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a><a href="mailto:contact@supplierwatch.cz">contact@supplierwatch.cz</a>
 <p style="margin:12px 0 0">Supplier Watch CZ is an independent service. It is not affiliated with the Czech Financial Administration, the Ministry of Justice or ČOI.</p>
 </div></footer>
 {script}</body>
@@ -91,7 +91,7 @@ guide('czech-vat-liability-unreliable-payer-bank-accounts',
 <li><strong>Check the supplier's status before each supply and each payment</strong> in the VAT register (see <a href="/guides/how-to-check-a-czech-supplier.html">how to check a Czech supplier</a>).</li>
 <li><strong>Pay only to an account published for that supplier.</strong> If the invoice shows a different account, ask the supplier to publish it first.</li>
 <li><strong>Use the special method of securing tax (§109a ZDPH)</strong> if you have doubts: you may pay the VAT amount directly to the supplier's tax office instead of to the supplier, and the supplier receives only the price without VAT.</li>
-<li><strong>Keep evidence</strong> of each check (date, result). Supplier Watch keeps a daily log for every supplier you watch.</li>
+<li><strong>Keep evidence</strong> of each check (date, result).<!--if monitoring--> Supplier Watch keeps a daily log for every supplier you watch.<!--end--></li>
 </ol>
 {CTA}
 <h2>Official sources</h2>
@@ -145,7 +145,7 @@ guide('how-to-check-a-czech-supplier',
 </table>
 
 <h2>Doing it automatically</h2>
-<p>Checking by hand works for one supplier. For a list of suppliers, the hard part is noticing when something changes. Supplier Watch runs all of these checks every morning and emails you only when a status, an address, a bank account or an insolvency record changes. Free for up to 5 suppliers.</p>
+<p>Checking by hand works for one supplier. For a list of suppliers, the hard part is noticing when something changes.<!--if monitoring--> Supplier Watch runs all of these checks every morning and emails you only when a status, an address, a bank account or an insolvency record changes. Free for up to 5 suppliers.<!--end--><!--if paused--> The <a href="/check.html">free Supplier Watch check</a> runs all of these checks for one IČO in one go; ongoing monitoring is paused for now (<a href="/#updates">get updates</a>).<!--end--></p>
 {CTA}
 {DISCLAIMER}""", 'How to check a supplier')
 
@@ -191,7 +191,7 @@ guide('doing-business-with-czech-suppliers',
 </ul>
 
 <h2>Step 4: keep watching</h2>
-<p>A supplier that is fine today can become an unreliable payer or file for insolvency next month. Re-check regularly, or let a monitoring service do it. Supplier Watch checks Czech suppliers every morning and sends alerts in English, only when something changes. See <a href="/guides/how-to-check-a-czech-supplier.html">how to check a Czech supplier</a> for each register in detail.</p>
+<p>A supplier that is fine today can become an unreliable payer or file for insolvency next month. Re-check regularly, or let a monitoring service do it.<!--if monitoring--> Supplier Watch checks Czech suppliers every morning and sends alerts in English, only when something changes.<!--end--> See <a href="/guides/how-to-check-a-czech-supplier.html">how to check a Czech supplier</a> for each register in detail.</p>
 {CTA}
 {DISCLAIMER}""", 'Guide for foreign companies')
 
@@ -207,7 +207,7 @@ write('guides/index.html', page('', 'Guides: checking Czech suppliers', 'Plain-E
 
 # ---------- Trust pages (About, Sources, API) ----------
 ABOUT = """<h1>About Supplier Watch</h1>
-<p>Supplier Watch CZ checks Czech suppliers every morning in the official public registers and emails you, in English with the Czech wording alongside, only when something changes. Each month you also get a PDF report of every check, which you can keep as evidence that you checked your suppliers.</p>
+<!--if monitoring--><p>Supplier Watch CZ checks Czech suppliers every morning in the official public registers and emails you, in English with the Czech wording alongside, only when something changes. Each month you also get a PDF report of every check, which you can keep as evidence that you checked your suppliers.</p><!--end--><!--if paused--><p>Supplier Watch CZ checks Czech suppliers in the official public registers, in English with the Czech wording alongside. The <a href="/check.html">free one-off check</a> is available; ongoing daily monitoring is currently paused.</p><!--end-->
 <h2>Who runs it</h2>
 <table>
 <tr><th>Operator</th><td>Nicholas Kossow Jennings, sole trader (fyzická osoba podnikající)</td></tr>
@@ -226,7 +226,7 @@ ABOUT = """<h1>About Supplier Watch</h1>
 <li><strong>Minimal data.</strong> We store your email, your supplier list and the check results. No tracking cookies, no ads. See the <a href="/privacy.html">privacy policy</a>.</li>
 <li><strong>Information, not advice.</strong> Results show what the registers said when we checked; they are not legal or tax advice.</li>
 </ul>
-<p><a class="cta" href="/#signup">Start free with 5 suppliers</a></p>"""
+<p><!--if monitoring--><a class="cta" href="/#signup">Start free with 5 suppliers</a><!--end--><!--if paused--><a class="cta" href="/check.html">Check a supplier free</a><!--end--></p>"""
 
 SOURCES = """<h1>Data sources</h1>
 <p>Supplier Watch uses only official public sources. For each one: who publishes it, what we use it for, and the terms we use it under. We check every source each morning before the customer checks (see <a href="#status">current status</a>).</p>

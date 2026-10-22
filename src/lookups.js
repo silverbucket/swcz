@@ -16,10 +16,11 @@ const db = (dataDir) => openDb(path.join(dataDir, 'accounts.json'));
 
 /** Start of a daily run: answers fetched before `at` are no longer fresh. Drops answers older than KEEP_DAYS. */
 export function markRunStart(dataDir, at = Date.now()) {
-    const d = db(dataDir);
-    d.prepare("INSERT INTO meta (k, v) VALUES ('lookups_valid_from', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(String(at));
-    d.prepare('DELETE FROM lookups WHERE fetched_at < ?').run(at - KEEP_DAYS * 864e5);
+    db(dataDir).prepare("INSERT INTO meta (k, v) VALUES ('lookups_valid_from', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(String(at));
+    pruneLookups(dataDir, at);
 }
+/** Drop answers older than KEEP_DAYS (also run by the daily job while monitoring is paused). Returns the count. */
+export function pruneLookups(dataDir, at = Date.now()) { return db(dataDir).prepare('DELETE FROM lookups WHERE fetched_at < ?').run(at - KEEP_DAYS * 864e5).changes; }
 
 /** Register sources (same signatures as REGISTER_SOURCES, for checkWatchlist) backed by the shared cache. */
 export function cachedSources(dataDir, { sources = REGISTER_SOURCES, now = () => Date.now(), staleFallback = false } = {}) {

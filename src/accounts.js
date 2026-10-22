@@ -80,7 +80,7 @@ export const suppliersText = (a) => a.icos.map((i) => (a.websites?.[i] ? `${i} $
 const conns = new Map();
 const tx = (db, fn) => { db.exec('BEGIN IMMEDIATE'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } };
 /** SQLite store next to the legacy JSON file (accounts.json -> accounts.db), shared by the web app and the daily run:
- * accounts, magic-link tokens, and the register lookup cache (see lookups.js). */
+ * accounts, magic-link tokens, the register lookup cache (see lookups.js) and the updates list (see updates.js). */
 export function openDb(file) {
     const dbFile = file.replace(/\.json$/, '') + '.db';
     if (conns.has(dbFile)) return conns.get(dbFile);
@@ -91,7 +91,8 @@ export function openDb(file) {
         CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, data TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS tokens (hash TEXT PRIMARY KEY, account_id TEXT NOT NULL, kind TEXT NOT NULL, exp INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS lookups (source TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, fetched_at INTEGER NOT NULL, PRIMARY KEY (source, key));
-        CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);`);
+        CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
+        CREATE TABLE IF NOT EXISTS updates (email TEXT PRIMARY KEY, created_at TEXT NOT NULL, confirmed_at TEXT, consent TEXT, source TEXT, confirm_hash TEXT UNIQUE, confirm_exp INTEGER, unsub TEXT NOT NULL UNIQUE);`);
     if (fs.existsSync(file)) { // one-time import of the old JSON store, then the JSON file is deleted (take a backup before deploying)
         tx(db, () => {
             if (db.prepare('SELECT 1 FROM accounts LIMIT 1').get()) return;
@@ -153,7 +154,7 @@ export class Accounts {
     limit(a) { return PLANS[a?.plan] ?? PLANS.free; }
 
     /** Create or refresh a pending signup. Returns { account, confirmToken }. */
-    signup(email, icos, { consentText, websites = {} }) {
+    signup(email, icos, { consentText, websites = {}, updatesOptIn = false }) {
         const e = normEmail(email);
         let a = this.byEmail(e);
         if (!a) {
@@ -162,7 +163,18 @@ export class Accounts {
         }
         if (!a.confirmed) { a.icos = icos.slice(0, this.limit(a)); a.websites = pickWebsites(a.icos, websites); } // confirmed users edit via the manage link
         a.pendingConsent = { text: consentText, at: new Date(this.now()).toISOString() };
-        return { account: a, confirmToken: this.issue(a.id, 'confirm') };
+        const confirmToken = this.issue(a.id, 'confirm');
+        // The updates opt-in belongs to this sign-up's link only: someone else re-submitting the form for the address
+        // must not add it to a link the owner confirms later. Kept as long as the link is valid, like the token itself.
+        const live = (a.updatesOptIn ?? []).filter((o) => o.exp > this.now());
+        if (updatesOptIn) live.push({ h: hash(confirmToken), exp: this.now() + TOKEN_TTL_MS.confirm });
+        if (live.length) a.updatesOptIn = live; else delete a.updatesOptIn;
+        return { account: a, confirmToken };
+    }
+    /** Whether the sign-up behind confirm token `t` ticked the updates box. Consumes only this link's choice: other pending links keep theirs. */
+    takeUpdatesOptIn(a, t) {
+        const h = hash(t); const all = a.updatesOptIn ?? []; const left = all.filter((o) => o.h !== h && o.exp > this.now()); const yes = all.some((o) => o.h === h);
+        if (left.length) a.updatesOptIn = left; else delete a.updatesOptIn; return yes;
     }
     // Tokens are written straight to the database (no save() needed).
     issue(accountId, kind) { const t = token(); this.sql.prepare('INSERT INTO tokens VALUES (?, ?, ?, ?)').run(hash(t), accountId, kind, this.now() + TOKEN_TTL_MS[kind]); this.prune(); return t; }

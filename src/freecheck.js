@@ -1,11 +1,13 @@
 // Free one-off "check one IČO" page: runs the same checks as the daily monitor, once, without an account.
 // Abuse limits: per-IP (default 5 per hour) and a global cap (default 60 per hour, so with the daily run we stay
 // under ISIR's 3,000 calls a day), both in memory. Register answers come from the shared cache (lookups.js), so an
-// IČO the daily run already checked costs the registers nothing and does not count against the limits.
+// IČO the daily run already checked costs the registers nothing and does not count against the limits. The hourly
+// health check (health.js) is exempt.
 import { checkWatchlist, currentAlerts } from './check.js';
 import { normaliseIco, isValidIco } from './ico.js';
 import { loadCoiList, normalizeDomain, COI_LICENCE_URL, COI_CREDIT } from './sources/coi.js';
 import { REGISTER_SOURCES, cachedSources } from './lookups.js';
+import { monitoringEnabled } from './site.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -55,7 +57,13 @@ ${error ? `<p class="sw-err" role="alert">${esc(error)}</p>` : ''}
 <p class="muted">Limited to a few checks per hour. Results come straight from the public registers at the moment you check; they are information, not legal or tax advice.</p>`;
 }
 
-export function renderResult(r, { coiUsed, stale = false }) {
+/** ok: every register answered; stale: a register is down, older answers shown; partial: some answered; error: none did. */
+export function resultStatus(r, stale = false) {
+    if (!r.sourceErrors.length) return stale ? 'stale' : 'ok';
+    return r.ares || r.vat || r.isir ? 'partial' : 'error';
+}
+
+export function renderResult(r, { coiUsed, stale = false, monitoring = true }) {
     const alerts = currentAlerts(r); const a = r.ares ?? {}; const v = r.vat; const rows = [];
     rows.push(['Name', a.found === false ? 'not found in ARES' : esc(a.name ?? '?')]);
     if (a.address) rows.push(['Registered address', esc(a.address)]);
@@ -69,17 +77,20 @@ export function renderResult(r, { coiUsed, stale = false }) {
     if (r.isir) rows.push(['Insolvency register (ISIR)', r.isir.cases.length ? r.isir.cases.map((c) => `${esc(c.caseNo)}${c.state ? ` (${esc(c.state)})` : ''}${c.ended ? ' ended' : ''}`).join('<br>') : 'no proceedings found']);
     if (r.website) rows.push([`ČOI risky e-shops (${esc(r.website)})`, r.coi ? (r.coi.matches.length ? `<strong>LISTED</strong>: ${r.coi.matches.map((m) => esc(`${m.domain}${m.reason ? ` - ${m.reason}` : ''}`)).join('<br>')}` : 'not listed') : 'list unavailable today']);
     const errs = r.sourceErrors.length ? `<p class="muted">Some registers did not answer: ${esc(r.sourceErrors.join('; '))}. Try again later.</p>` : '';
-    return `<h1>${esc(a.name ?? r.ico)} · IČO ${esc(r.ico)}</h1>
+    return `<h1 data-result="${resultStatus(r, stale)}">${esc(a.name ?? r.ico)} · IČO ${esc(r.ico)}</h1>
 ${alerts.length ? `<p class="sw-err"><strong>Warnings:</strong><br>${alerts.map((x) => esc(ALERT_TEXT[x] ?? x)).join('<br>')}</p>` : '<p><strong>No warnings found in the checked registers today.</strong></p>'}
 <table>${rows.map(([k, val]) => `<tr><th style="text-align:left;vertical-align:top;padding:.2rem 1rem .2rem 0">${k}</th><td>${val}</td></tr>`).join('')}</table>${errs}
 ${stale ? `<p class="sw-err">A register did not answer just now, so this shows the last answer we have, from ${esc(new Date(r.checkedAt).toISOString().slice(0, 10))}. It may be out of date; check again later. / Registr právě neodpovídá, zobrazujeme poslední známá data, mohou být zastaralá.</p>` : ''}
 <p class="muted">Register data from ${esc(new Date(r.checkedAt).toISOString().slice(0, 16).replace('T', ' '))} UTC. Sources: ARES, Financial Administration VAT register, ISIR${coiUsed ? `, <a href="${COI_LICENCE_URL}">${COI_CREDIT}</a> (Supplier Watch is not affiliated with or endorsed by ČOI)` : ''}. Information only, not legal or tax advice.</p>
-<h2>Get an email when this changes</h2>
+${monitoring ? `<h2>Get an email when this changes</h2>
 <p>A supplier can become an unreliable VAT payer, change its bank accounts or enter insolvency at any time. Supplier Watch checks your suppliers every morning and emails you only when something changes. Free for up to 5 suppliers.</p>
-<p><a class="cta" href="/#signup">Watch this supplier for free</a> <a href="/check.html">Check another IČO</a> · <a href="/guides/">Guides</a></p>`;
+<p><a class="cta" href="/#signup">Watch this supplier for free</a> <a href="/check.html">Check another IČO</a> · <a href="/guides/">Guides</a></p>` : `<h2>Want to know when this changes?</h2>
+<p>A supplier can become an unreliable VAT payer, change its bank accounts or enter insolvency at any time. Ongoing monitoring is paused for now; leave your email and we'll tell you when daily checks are back.</p>
+<p><a class="cta" href="/#updates">Get updates</a> <a href="/check.html">Check another IČO</a> · <a href="/guides/">Guides</a></p>`}`;
 }
 
-export function createFreeCheck({ env = process.env, dataDir, check = checkWatchlist, sources = REGISTER_SOURCES, loadCoi = loadCoiList, limiter = new RateLimiter({ perIp: Number(env.FREECHECK_PER_IP || 5), global: Number(env.FREECHECK_GLOBAL || 60) }), now = () => Date.now() } = {}) {
+export function createFreeCheck({ env = process.env, dataDir, check = checkWatchlist, sources = REGISTER_SOURCES, loadCoi = loadCoiList, limiter = new RateLimiter({ perIp: Number(env.FREECHECK_PER_IP || 5), global: Number(env.FREECHECK_GLOBAL || 60) }), now = () => Date.now(), exempt = () => false } = {}) {
+    const monitoring = monitoringEnabled(env);
     let coiCache = null; let coiAt = 0; let lookups;
     const getCoi = async () => { if (!coiCache || now() - coiAt > 6 * 3600e3) { coiCache = await loadCoi({ dataDir }).catch(() => null); coiAt = now(); } return coiCache; };
     return async function handleCheck(req, form, page) {
@@ -92,10 +103,10 @@ export function createFreeCheck({ env = process.env, dataDir, check = checkWatch
         lookups ??= cachedSources(dataDir, { sources, now, staleFallback: true });
         const isirEnabled = env.ISIR_DISABLED !== '1';
         // Answers already in the cache cost the registers nothing, so they skip the limits.
-        if (!lookups.cached(ico, { isir: isirEnabled }) && !limiter.allow(clientIp(req))) return [429, page('Too many checks', `<p>Too many checks for now. Please try again in an hour, or <a href="/#signup">sign up free</a> to have up to 5 suppliers checked every day.</p>`)];
+        if (!lookups.cached(ico, { isir: isirEnabled }) && !exempt(req) && !limiter.allow(clientIp(req))) return [429, page('Too many checks', `<p>Too many checks for now. Please try again in an hour${monitoring ? ', or <a href="/#signup">sign up free</a> to have up to 5 suppliers checked every day' : ''}.</p>`)];
         const coi = website && env.COI_DISABLED !== '1' ? await getCoi() : undefined;
         const { rows } = await check([{ ico, website }], { isirEnabled, coi, sources: lookups });
         const asOf = lookups.asOf(ico, { isir: isirEnabled }); if (asOf) rows[0].checkedAt = new Date(asOf.at).toISOString(); // may be the morning's daily run
-        return [200, page(`Check result ${ico}`, renderResult(rows[0], { coiUsed: !!website && coi !== undefined, stale: asOf?.stale }))];
+        return [200, page(`Check result ${ico}`, renderResult(rows[0], { coiUsed: !!website && coi !== undefined, stale: asOf?.stale, monitoring }))];
     };
 }

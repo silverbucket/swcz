@@ -2,6 +2,9 @@
 // Supplier Watch web app. Listens on 127.0.0.1 behind the web server and serves:
 //   static site, /terms.html, /privacy.html, POST /signup, GET+POST /confirm, POST /manage-link,
 //   GET+POST /check (free one-off check), GET+POST /manage, GET+POST /unsubscribe, POST /stripe/webhook, GET /healthz
+// With SIGNUPS_ENABLED=false (site.js) only the static site, the free check, the updates list (POST /signup with
+// updates=1, /confirm?u=, /unsubscribe?u=), account unsubscribes and /healthz stay; the rest answers "paused".
+import crypto from 'node:crypto';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,6 +18,9 @@ import { PLAN_INFO } from './plans.js';
 import { historyMonths, validMonth } from './history.js';
 import { getReport, monthLabel } from './monthly.js';
 import { readStatus } from './canary.js';
+import { Updates, UPDATES_CONSENT } from './updates.js';
+import { monitoringEnabled, sitePage, writeSite } from './site.js';
+import { PROBE_HEADER, readHealth, startHealth } from './health.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const VERSION = (() => { try { return fs.readFileSync(path.join(ROOT, 'VERSION'), 'utf8').trim(); } catch { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version; } })();
@@ -41,7 +47,10 @@ export function createServer({
     env = process.env, dataDir = env.DATA_DIR || 'data', secret = env.STRIPE_WEBHOOK_SECRET,
     baseUrl = (env.BASE_URL || 'https://supplierwatch.cz').replace(/\/$/, ''), mailer = createMailer(env), log = console.log, now = () => Date.now(), freeCheck, stripePortal,
 } = {}) {
-    const handleCheck = freeCheck ?? createFreeCheck({ env, dataDir });
+    const on = monitoringEnabled(env);
+    const healthToken = crypto.randomBytes(24).toString('base64url'); // only this process knows it (health.js)
+    const isProbe = (req) => req.headers[PROBE_HEADER] === healthToken;
+    const handleCheck = freeCheck ?? createFreeCheck({ env, dataDir, exempt: isProbe });
     const accFile = path.join(dataDir, 'accounts.json');
     const links = { starter: env.STRIPE_LINK_STARTER || 'https://buy.stripe.com/test_3cIdR9dpr1vZ5YWbic1ZS00', pro: env.STRIPE_LINK_PRO || 'https://buy.stripe.com/test_bJe28rdprb6z0ECdqk1ZS01', accountant: env.STRIPE_LINK_ACCOUNTANT || ACCOUNTANT_TEST_LINK };
     const handleApi = createApi({ dataDir, env, now, log });
@@ -63,6 +72,7 @@ export function createServer({
     const mailLimit = new RateLimiter({ perIp: Number(env.MAIL_FORM_PER_IP || 10), global: Number(env.MAIL_FORM_GLOBAL || 300), now });
     const tooMany = (send) => send(429, page('Too many requests', '<p>Too many requests from your network. Please try again in an hour. / Příliš mnoho požadavků, zkuste to prosím za hodinu.</p>'));
     const unsubUrl = (a) => `${baseUrl}/unsubscribe?t=${a.unsubToken}`;
+    const pausedHtml = page('Monitoring paused', `<h1>Monitoring is paused / Sledování je pozastaveno</h1><p>Ongoing monitoring is currently paused. The free one-off check is available.<br>Průběžné sledování je momentálně pozastaveno. Jednorázová bezplatná kontrola je dostupná.</p><p><a class="cta" href="/check.html">Check a supplier free / Ověřit dodavatele</a> <a href="/#updates">Get updates / Novinky e-mailem</a></p>`);
     const checkoutUrl = (a, plan) => `${links[plan]}?client_reference_id=${encodeURIComponent(a.id)}&prefilled_email=${encodeURIComponent(a.email)}`;
     const SCRIPTS = '<script src="/csvimport.js"></script><script src="/suppliers.js"></script>';
     const hidden = (t, extra = {}) => `<input type="hidden" name="t" value="${esc(t)}">${Object.entries(extra).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('')}`;
@@ -138,16 +148,19 @@ ${reportsHtml(a, t, c.id)}
         if (req.method === 'GET' && P === '/healthz') {
             if (!url.searchParams.has('detail')) return send(200, '{"ok":true}', 'application/json');
             const st = readStatus(dataDir);
-            return send(200, JSON.stringify({ ok: true, version: VERSION, sources: st ? { checkedAt: st.checkedAt, ok: st.ok, failed: st.failed, detail: st.sources } : null }), 'application/json');
+            const h = readHealth(dataDir);
+            return send(200, JSON.stringify({ ok: true, version: VERSION, monitoring: on, sources: st ? { checkedAt: st.checkedAt, ok: st.ok, failed: st.failed, detail: st.sources } : null, health: h ? { checkedAt: h.checkedAt, ok: h.ok, failed: h.failed, detail: h.probes } : null }), 'application/json');
         }
         if (P === '/api' || P.startsWith('/api/')) {
-            const r = await handleApi(req, url);
+            const r = on ? await handleApi(req, url) : { status: 503, headers: {}, body: { error: { code: 'paused', message: 'Ongoing monitoring and the API are paused.' } } };
             res.writeHead(r.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...r.headers });
             return res.end(req.method === 'HEAD' ? undefined : JSON.stringify(r.body));
         }
 
         // /check.html is static (nginx); its form posts to /manage-link?freecheck=1 because that path is already proxied.
         if (P === '/check' || (req.method === 'POST' && P === '/manage-link' && url.searchParams.get('freecheck') === '1')) { const [code, html] = await handleCheck(req, form(), page); return send(code, html); }
+
+        if (!on && (P === '/manage' || P === '/billing' || P === '/manage-link' || (P === '/confirm' && !url.searchParams.has('u')))) return send(503, pausedHtml);
 
         if (req.method === 'POST' && P === '/stripe/webhook') {
             if (!verifySignature(body, req.headers['stripe-signature'], secret)) return send(400, '{"error":"bad signature"}', 'application/json');
@@ -157,16 +170,35 @@ ${reportsHtml(a, t, c.id)}
             return send(200, '{"received":true}', 'application/json');
         }
 
+        if (req.method === 'POST' && P === '/signup' && form().updates === '1') { // updates list (home page form), double opt-in
+            const f = form(); const email = normEmail(f.email);
+            if (!validEmail(email)) return send(400, page('Error', '<p>Please enter a valid email. / Zadejte platný e-mail.</p><p><a href="/#updates">Back</a></p>'));
+            if (f.consent !== 'yes') return send(400, page('Error', '<p>Please tick the consent box. / Zaškrtněte prosím souhlas.</p><p><a href="/#updates">Back</a></p>'));
+            const done = () => send(200, page('Check your email', `<h1>Check your email / Zkontrolujte e-mail</h1><p>To join the updates list, click the link we sent to ${esc(email)}. / Pro přihlášení k odběru klikněte na odkaz v e-mailu.</p>`));
+            if (f.fax || isProbe(req)) return done(); // honeypot; health check: validated, nothing stored or sent
+            if (!mailLimit.allow(clientIp(req))) return tooMany(send);
+            const up = new Updates(accFile, { now });
+            // Cooldown first: a new request replaces the pending link, and within the cooldown no new email would carry it.
+            const r = !up.get(email)?.confirmed_at && !cooldown('updates', email) ? up.request(email) : {};
+            if (r.confirmToken) {
+                await mailer.send({ to: email, unsubscribeUrl: `${baseUrl}/unsubscribe?u=${r.unsub}`, subject: 'Confirm Supplier Watch updates / Potvrďte odběr novinek',
+                    text: `Please confirm that you want occasional emails about Supplier Watch updates, for example when daily supplier monitoring is back (link valid 48 hours):\nPotvrďte prosím, že chcete dostávat občasné e-maily o novinkách Supplier Watch, například až se vrátí denní sledování dodavatelů (odkaz platí 48 hodin):\n\n${baseUrl}/confirm?u=${r.confirmToken}\n\nIf you did not ask for this, ignore this email. / Pokud jste o to nežádali, e-mail ignorujte.` });
+            }
+            return done();
+        }
+        if (req.method === 'POST' && P === '/signup' && !on) return send(503, pausedHtml);
+
         if (req.method === 'POST' && P === '/signup') {
             const f = form(); const email = normEmail(f.email);
             if (!validEmail(email)) return send(400, page('Error', '<p>Please enter a valid email. / Zadejte platný e-mail.</p><p><a href="/#signup">Back</a></p>'));
             if (f.consent !== 'yes') return send(400, page('Error', '<p>Please tick the consent box. / Zaškrtněte prosím souhlas.</p><p><a href="/#signup">Back</a></p>'));
             if (f.fax) return send(200, page('Check your email', '<p>Check your email.</p>')); // honeypot
-            if (!mailLimit.allow(clientIp(req))) return tooMany(send);
+            if (!isProbe(req) && !mailLimit.allow(clientIp(req))) return tooMany(send);
             const { icos, websites, invalid } = parseSupplierForm(new URLSearchParams(body));
             if (!icos.length) return send(400, page('Error', `<p>No valid IČO found. / Nenalezeno žádné platné IČO.${invalid.length ? ` Invalid: ${esc(invalid.join(', '))}` : ''}</p><p><a href="/#signup">Back</a></p>`));
+            if (isProbe(req)) return send(200, page('Check your email', '<h1>Check your email / Zkontrolujte e-mail</h1>')); // health check: validated, nothing stored or sent
             const acc = new Accounts(accFile, { now });
-            const { account, confirmToken } = acc.signup(email, icos, { consentText: CONSENT_TEXT, websites }); acc.save();
+            const { account, confirmToken } = acc.signup(email, icos, { consentText: CONSENT_TEXT, websites, updatesOptIn: f.updates_optin === 'yes' }); acc.save();
             if (!cooldown("signup", email)) {
                 await mailer.send({ to: email, unsubscribeUrl: unsubUrl(account), subject: 'Confirm your Supplier Watch sign-up / Potvrďte registraci',
                     text: `Please confirm your email to start daily supplier checks (link valid 48 hours):\nPotvrďte prosím e-mail pro spuštění denních kontrol (odkaz platí 48 hodin):\n\n${baseUrl}/confirm?t=${confirmToken}\n\nYou can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid month, then moves to the free plan.\nTarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného měsíce, poté přejde na bezplatný.\n\nIf you did not sign up, ignore this email. / Pokud jste se neregistrovali, e-mail ignorujte.` });
@@ -175,11 +207,18 @@ ${reportsHtml(a, t, c.id)}
             return send(200, page('Check your email', `<h1>Check your email / Zkontrolujte e-mail</h1><p>We sent a confirmation link to ${esc(email)}.</p>${capped}${invalid.length ? `<p>Ignored invalid IČO: ${esc(invalid.join(', '))}</p>` : ''}`));
         }
 
+        if (P === '/confirm' && url.searchParams.has('u')) { // updates list; only POST confirms (mail link scanners)
+            const u = url.searchParams.get('u');
+            if (req.method !== 'POST') return send(200, page('Confirm updates', `<h1>Confirm Supplier Watch updates / Potvrďte odběr novinek</h1><form method="post" action="/confirm?u=${esc(u)}"><button>Confirm / Potvrdit</button></form>`));
+            if (!new Updates(accFile, { now }).confirm(u)) return send(400, page('Link expired', '<p>This link is invalid or expired. Sign up again on the <a href="/#updates">home page</a>. / Odkaz je neplatný nebo vypršel.</p>'));
+            return send(200, page('Subscribed', '<h1>You\'re on the list / Jste přihlášeni</h1><p>We\'ll email you about Supplier Watch updates. Every email has an unsubscribe link. / Budeme vám psát o novinkách, každý e-mail obsahuje odkaz pro odhlášení.</p><p><a href="/check.html">Check a supplier free / Ověřit dodavatele</a></p>'));
+        }
         if (P === '/confirm') { // only POST confirms: mail link scanners (GET, HEAD) must not use up the single-use link
             const t = url.searchParams.get('t') || form().t;
             if (req.method !== 'POST') return send(200, page('Confirm your email', `<h1>Confirm your email / Potvrďte e-mail</h1><form method="post" action="/confirm">${hidden(t)}<button>Confirm and start daily checks / Potvrdit</button></form>`));
             const acc = new Accounts(accFile, { now }); const a = acc.confirm(t);
             if (!a) return send(400, page('Link expired', '<p>This link is invalid or expired. Sign up again on the <a href="/#signup">home page</a>.</p>'));
+            if (acc.takeUpdatesOptIn(a, t)) new Updates(accFile, { now }).addConfirmed(a.email, UPDATES_CONSENT, 'signup');
             const mt = acc.issue(a.id, 'manage'); acc.save();
             return send(200, manageHtml(acc, a, mt, '<p><strong>Email confirmed. Daily checks start tomorrow at 06:30 Prague time. / E-mail potvrzen.</strong></p>'));
         }
@@ -258,10 +297,17 @@ ${reportsHtml(a, t, c.id)}
             return send(200, manageHtml(acc, a, t, note));
         }
 
+        if (P === '/unsubscribe' && url.searchParams.has('u')) { // updates list: GET shows a button, POST removes the address (also RFC 8058 one-click)
+            const u = url.searchParams.get('u');
+            if (req.method !== 'POST') return send(200, page('Unsubscribe', `<form method="post" action="/unsubscribe?u=${esc(u)}"><p>Stop Supplier Watch update emails? / Zastavit e-maily s novinkami?</p><button>Unsubscribe / Odhlásit</button></form>`));
+            const gone = new Updates(accFile, { now }).unsubscribe(u);
+            return send(gone ? 200 : 400, page('Unsubscribe', gone ? '<p>You\'re unsubscribed and your address is deleted from the updates list. / Odhlášení proběhlo, adresu jsme ze seznamu smazali.</p>' : '<p>Unknown link (perhaps already unsubscribed). / Neznámý odkaz.</p>'));
+        }
         if (P === '/unsubscribe') { // GET/HEAD show a button (link scanners must not unsubscribe), POST does it (also RFC 8058 one-click)
             const t = url.searchParams.get('t') || form().t;
             if (req.method !== 'POST') return send(200, page('Unsubscribe', `<form method="post" action="/unsubscribe?t=${esc(t)}"><p>Stop all Supplier Watch emails? / Zastavit všechny e-maily?</p><button>Unsubscribe / Odhlásit</button></form>`));
             const acc = new Accounts(accFile, { now }); const a = acc.unsubscribe(t); if (a) acc.save();
+            if (a && a.unsubToken === t) new Updates(accFile, { now }).remove(a.email); // the owner asked to stop all emails, updates included
             if (!a) return send(400, page('Unsubscribe', '<p>Unknown link.</p>'));
             if (a.unsubToken !== t) return send(200, page('Unsubscribe', '<p>You\'re unsubscribed and won\'t get any more emails from this list. / Odhlášení proběhlo, další e-maily už nedostanete.</p>')); // a client's extra recipient
             const paid = acc.liveSubscription(a) ? '<p>You have a paid plan: unsubscribing does not cancel it. Cancel it with the Manage billing button on your manage page; your account is deleted after the plan ends. / Placený tarif tím zrušen není, zrušte ho tlačítkem Správa plateb.</p>' : '';
@@ -277,17 +323,19 @@ ${reportsHtml(a, t, c.id)}
             if (fs.existsSync(f) && fs.statSync(f).isDirectory()) f = path.join(f, 'index.html');
             if (f.startsWith(path.join(ROOT, 'site')) && fs.existsSync(f) && fs.statSync(f).isFile()) {
                 const types = { '.js': 'text/javascript; charset=utf-8', '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml; charset=utf-8' };
-                return send(200, fs.readFileSync(f), types[path.extname(f)] || 'application/octet-stream');
+                return send(200, f.endsWith('.html') ? sitePage(fs.readFileSync(f, 'utf8'), on) : fs.readFileSync(f), types[path.extname(f)] || 'application/octet-stream');
             }
         }
         return send(404, page('Not found', '<p>Not found.</p>'));
     }
 
-    return http.createServer((req, res) => {
+    const srv = http.createServer((req, res) => {
         const chunks = []; let size = 0;
         req.on('data', (c) => { size += c.length; if (size > 1e6) req.destroy(); else chunks.push(c); });
         req.on('end', () => handle(req, res, Buffer.concat(chunks).toString('utf8')).catch((e) => { log(`error ${req.method} ${req.url.split('?')[0]}: ${e.message}`); if (!res.headersSent) { res.writeHead(500); res.end('Server error'); } }));
     });
+    srv.healthToken = healthToken;
+    return srv;
 }
 
 export function writeCheckPage(file = path.join(ROOT, 'site', 'check.html')) { fs.writeFileSync(file, checkPageHtml(page)); }
@@ -297,5 +345,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const port = Number(process.env.PORT || 8787);
     if (!process.env.STRIPE_WEBHOOK_SECRET) console.error('warning: STRIPE_WEBHOOK_SECRET not set; all webhooks will be rejected');
     if (!process.env.SMTP_HOST || !process.env.SMTP_PASS) console.error('warning: SMTP_HOST/SMTP_PASS not set; emails are written to DATA_DIR/outbox instead of sent');
-    createServer().listen(port, '127.0.0.1', () => console.log(`supplierwatch app on 127.0.0.1:${port}`));
+    const env = process.env; const dataDir = env.DATA_DIR || 'data'; const on = monitoringEnabled(env);
+    if (!on) { // paused, nobody can reach the billing portal: refuse while any subscription is not set to end (an unpaid one can become active again)
+        const acc = new Accounts(path.join(dataDir, 'accounts.json')); const paying = acc.all().filter((a) => a.subscription && !a.cancelAt);
+        if (paying.length) { console.error(`SIGNUPS_ENABLED=false but ${paying.length} Stripe subscription(s) are not cancelled: ${paying.map((a) => a.id).join(', ')}. Cancel them in the Stripe dashboard first (or turn sign-ups back on).`); process.exit(1); }
+    }
+    const siteDir = env.SITE_DIR || path.join(dataDir, 'site'); // nginx root
+    console.log(`monitoring ${on ? 'enabled' : 'PAUSED'}; wrote ${writeSite(path.join(ROOT, 'site'), siteDir, on)} site files to ${siteDir}`);
+    if (!env.HEALTH_EMAIL) console.error('warning: HEALTH_EMAIL not set; health check alerts go to OPS_EMAIL');
+    const mailer = createMailer(env); const srv = createServer({ env, dataDir, mailer });
+    srv.listen(port, '127.0.0.1', () => console.log(`supplierwatch app on 127.0.0.1:${port}`));
+    startHealth({ env, dataDir, mailer, token: srv.healthToken });
 }
