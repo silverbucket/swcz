@@ -20,7 +20,7 @@ export const validMonth = (s) => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(s ?? ''))
 const hasErr = (item, src) => item.sourceErrors?.some((e) => e.startsWith(`${src}:`));
 
 /** Turn one runner report item into a history record with an explicit status per check. */
-export function recordFor(item, { at = new Date().toISOString(), list = 'main', client = null, isirEnabled = true, coiRun = false } = {}) {
+export function recordFor(item, { at = new Date().toISOString(), list = 'main', client = null, isirEnabled = true, coiRun = false, coiListDate = null } = {}) {
     const ch = (item.changes ?? []).map((c) => c.type); const al = item.alerts ?? [];
     const rec = { at, list, client, ico: item.ico, name: item.name ?? null, website: item.website ?? null, alerts: al, changes: item.changes ?? [], checks: {} };
     if (al.includes('INVALID_ICO')) { for (const s of SOURCES) rec.checks[s] = { status: 'invalid', detail: 'invalid IČO' }; return rec; }
@@ -39,9 +39,10 @@ export function recordFor(item, { at = new Date().toISOString(), list = 'main', 
     if (hasErr(item, 'isir')) c.isir = { status: 'failed', detail: 'ISIR did not answer or failed the daily self-check' };
     else if (!isirEnabled || item.insolvencyCases == null) c.isir = { status: 'not_run', detail: 'not checked' };
     else c.isir = al.includes('INSOLVENCY_PROCEEDING') || ch.includes('INSOLVENCY_CASE_NEW_OR_CHANGED') ? { status: 'alert', detail: item.insolvencyCases.map((x) => x.caseNo).join(', ') } : { status: 'ok', detail: item.insolvencyCases.length ? 'only ended proceedings' : 'no proceedings' };
+    const asOf = coiListDate ? ` (saved list from ${coiListDate.slice(0, 10)})` : '';
     if (!item.website) c.coi = { status: 'not_run', detail: 'no website given' };
     else if (hasErr(item, 'coi') || !coiRun) c.coi = { status: coiRun ? 'failed' : 'not_run', detail: coiRun ? 'ČOI list unavailable' : 'not checked' };
-    else c.coi = al.includes('COI_RISKY_WEBSITE') || ch.some((x) => x.startsWith('COI_')) ? { status: 'alert', detail: `${item.website} on the ČOI list` } : { status: 'ok', detail: `${item.website} not listed` };
+    else c.coi = al.includes('COI_RISKY_WEBSITE') || ch.some((x) => x.startsWith('COI_')) ? { status: 'alert', detail: `${item.website} on the ČOI list${asOf}` } : { status: 'ok', detail: `${item.website} not listed${asOf}` };
     return rec;
 }
 

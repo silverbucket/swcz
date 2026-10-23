@@ -62,11 +62,12 @@ export const COI_MAX_CACHE_AGE_MS = 7 * 24 * 3600e3;
 /**
  * Download the list once and cache the raw file in <dataDir>/coi/. If the download fails, fall back
  * to a cached copy younger than maxAgeMs; otherwise return null (callers then skip the ČOI check
- * and infer no changes). Never throws.
+ * and infer no changes). cacheOnly: don't download, only use the cache (today's self-check failed). Never throws.
  */
-export async function loadCoiList({ dataDir, fetchImpl = fetch, url = COI_URL, log = () => {}, now = () => Date.now(), maxAgeMs = COI_MAX_CACHE_AGE_MS } = {}) {
+export async function loadCoiList({ dataDir, fetchImpl = fetch, url = COI_URL, log = () => {}, now = () => Date.now(), maxAgeMs = COI_MAX_CACHE_AGE_MS, cacheOnly = false } = {}) {
     const dir = path.join(dataDir, 'coi'); const file = path.join(dir, 'rizikove-seznam.csv');
     try {
+        if (cacheOnly) throw new Error('self-check failed');
         const res = await fetchImpl(url, { headers: { 'User-Agent': 'supplierwatch.cz' }, signal: AbortSignal.timeout(30000) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const buf = new Uint8Array(await res.arrayBuffer());

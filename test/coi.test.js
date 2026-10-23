@@ -119,6 +119,37 @@ test('runAll: one download per run, alert email with ČOI credit, failure does n
     assert.match(sent.at(-1).text, /removed from the ČOI list/);
 });
 
+test('runAll: ČOI fails the self-check -> the saved list is used and dated; no saved list -> failed', async () => {
+    const dataDir = tmp();
+    const acc = new Accounts(path.join(dataDir, 'accounts.json'));
+    const { account } = acc.signup('a@x.cz', ['27082440', '45274649'], { consentText: 'c', websites: { 27082440: 'clarkscz.cz', 45274649: 'clean.cz' } });
+    account.confirmed = true; acc.save();
+    const check = (items, o) => checkWatchlist(items, { ...o, sources: fakeSources });
+    const sent = []; const mailer = { send: async (m) => { sent.push(m); } };
+    const canary = async () => ({ ok: false, failed: ['coi'] });
+    const opts = []; let list = { entries: parseCsv(decode(buf)), fetchedAt: '2026-10-20T04:30:00.000Z', stale: true };
+    const loadCoi = async (o) => { opts.push(o); return list; };
+    const base = { env: {}, dataDir, mailer, check, log: () => {}, isirEnabled: false, loadCoi, canary };
+    await runAll(base);
+    assert.equal(opts.length, 1); assert.equal(opts[0].cacheOnly, true, 'no download after a failed self-check');
+    const latest = JSON.parse(fs.readFileSync(path.join(dataDir, 'state', `${account.id}.json`), 'utf8')).latest;
+    assert.equal(latest['27082440'].checks.coi.status, 'alert'); assert.match(latest['27082440'].checks.coi.detail, /saved list from 2026-10-20/);
+    assert.equal(latest['45274649'].checks.coi.status, 'ok');
+    assert.match(sent[0].text, /saved copy from 2026-10-20/); assert.doesNotMatch(sent[0].text, /NOT CHECKED/);
+    list = null;
+    await runAll(base);
+    const l2 = JSON.parse(fs.readFileSync(path.join(dataDir, 'state', `${account.id}.json`), 'utf8')).latest;
+    assert.equal(l2['45274649'].checks.coi.status, 'failed');
+});
+
+test('loadCoiList cacheOnly never downloads', async () => {
+    const dataDir = tmp(); let fetched = 0; const f = async (...a) => { fetched++; return okFetch(...a); };
+    assert.equal(await loadCoiList({ dataDir, fetchImpl: f, cacheOnly: true }), null);
+    await loadCoiList({ dataDir, fetchImpl: f }); assert.equal(fetched, 1);
+    const c = await loadCoiList({ dataDir, fetchImpl: f, cacheOnly: true });
+    assert.equal(fetched, 1); assert.equal(c.stale, true); assert.equal(c.entries.length, 6);
+});
+
 test('signup/manage forms accept and show websites', async () => {
     const { createServer } = await import('../src/server.js');
     const dataDir = tmp(); const sent = [];
