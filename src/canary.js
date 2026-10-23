@@ -7,7 +7,7 @@ import path from 'node:path';
 import { getSubject } from './sources/ares.js';
 import { getStatuses } from './sources/dph.js';
 import { getByIco } from './sources/isir.js';
-import { fetchRiskyWebs } from './sources/coi.js';
+import { fetchRiskyWebs, listProblem } from './sources/coi.js';
 
 export const CANARY_ICO = '27082440'; // Alza.cz a.s.: large, long-standing VAT payer with published accounts
 export const SOURCE_NAMES = { ares: 'ARES business register', vat: 'VAT register (Financial Administration)', isir: 'Insolvency register ISIR', coi: 'ČOI risky e-shop list' };
@@ -34,9 +34,8 @@ export const PROBES = {
         must(r.cases.every((c) => typeof c.caseNo === 'string'), 'case number missing');
     },
     async coi({ coi = fetchRiskyWebs } = {}) {
-        const e = await coi();
-        must(Array.isArray(e) && e.length >= 50, `only ${e?.length ?? 0} entries`);
-        must(e.filter((x) => /\.[a-z]{2,}$/.test(x.domain)).length / e.length > 0.9, 'domains do not parse');
+        const bad = listProblem(await coi());
+        must(!bad, bad);
     },
 };
 
@@ -78,7 +77,7 @@ export async function runCanary({ env = process.env, dataDir = env.DATA_DIR || '
     const base = (env.BASE_URL || 'https://supplierwatch.cz').replace(/\/$/, '');
     if (mailer && failed.length) {
         await mailer.send({ to: ops, unsubscribeUrl: `${base}/`, subject: `Supplier Watch ops: data source self-check FAILED (${failed.join(', ')})`,
-            text: `The daily self-check failed for: ${failed.map((f) => `${SOURCE_NAMES[f] ?? f}`).join(', ')}.\n\n${failed.map((f) => `${f}: ${sources[f].error} (${sources[f].attempts ?? 1} attempt${sources[f].attempts > 1 ? 's' : ''})`).join('\n')}\n\nToday's customer checks mark these sources as FAILED (no changes inferred, no "all clear").${failed.includes('coi') ? ' For ČOI, the saved list (if under 7 days old) is used instead, dated in the report.' : ''}\nStatus: ${base}/healthz?detail=1` }).catch((e) => log(`canary mail failed: ${e.message}`));
+            text: `The daily self-check failed for: ${failed.map((f) => `${SOURCE_NAMES[f] ?? f}`).join(', ')}.\n\n${failed.map((f) => `${f}: ${sources[f].error} (${sources[f].attempts ?? 1} attempt${sources[f].attempts > 1 ? 's' : ''})`).join('\n')}\n\nToday's customer checks mark these sources as FAILED (no changes inferred, no "all clear").${failed.includes('coi') ? ' For ČOI, our saved copy of the list is used instead if it is at most 7 days old and passes the same checks (dated in the report); otherwise ČOI is FAILED too.' : ''}\nStatus: ${base}/healthz?detail=1` }).catch((e) => log(`canary mail failed: ${e.message}`));
     } else if (mailer && prev && prev.ok === false) {
         await mailer.send({ to: ops, unsubscribeUrl: `${base}/`, subject: 'Supplier Watch ops: all data sources OK again', text: `All data sources passed the self-check at ${st.checkedAt}.` }).catch(() => {});
     }

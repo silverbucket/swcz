@@ -55,7 +55,7 @@ test('runCanary retries a failed probe: a short blip is not a failure, a lasting
     // probes run in parallel: a slow source doesn't hold up the others, and `failed` keeps probe order
     const order = []; const slow = (k, ms, fail) => async () => { await new Promise((r) => setTimeout(r, ms)); order.push(k); if (fail) throw new Error('down'); return good[k === 'vat' ? 'dph' : k](CANARY_ICO); };
     st = await runCanary({ env: {}, dataDir, deps: { ares: slow('ares', 30, true), dph: slow('vat', 1), isir: slow('isir', 1, true), coi: slow('coi', 1) }, retryDelaysMs: [], probes: { ares: (d) => d.ares(), vat: (d) => d.dph(), isir: (d) => d.isir(), coi: (d) => d.coi() } });
-    assert.equal(order.at(-1), 'ares'); assert.deepEqual(st.failed, ['ares', 'isir']); assert.match(sent[0].text, /saved list .* is used instead/);
+    assert.equal(order.at(-1), 'ares'); assert.deepEqual(st.failed, ['ares', 'isir']); assert.match(sent[0].text, /saved copy of the list is used instead/);
 });
 
 test('a source that fails the self-check is marked NOT CHECKED for customers: no false all-clear, no inferred change', async () => {

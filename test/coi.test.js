@@ -60,15 +60,15 @@ test('accounts store websites only for kept suppliers', () => {
 test('loadCoiList caches and falls back; tolerates failure', async () => {
     const dataDir = tmp(); const logs = [];
     const fail = async () => { throw new Error('ECONNREFUSED'); };
-    assert.equal(await loadCoiList({ dataDir, fetchImpl: fail, log: (m) => logs.push(m) }), null);
-    const l = await loadCoiList({ dataDir, fetchImpl: okFetch });
+    assert.equal(await loadCoiList({ dataDir, minEntries: 1, fetchImpl: fail, log: (m) => logs.push(m) }), null);
+    const l = await loadCoiList({ dataDir, minEntries: 1, fetchImpl: okFetch });
     assert.equal(l.entries.length, 6); assert.equal(l.stale, false);
     assert.ok(fs.existsSync(path.join(dataDir, 'coi', 'rizikove-seznam.csv')));
-    const c = await loadCoiList({ dataDir, fetchImpl: fail });
+    const c = await loadCoiList({ dataDir, minEntries: 1, fetchImpl: fail });
     assert.equal(c.stale, true); assert.equal(c.entries.length, 6);
-    assert.equal(await loadCoiList({ dataDir, fetchImpl: fail, now: () => Date.now() + 8 * 86400e3 }), null);
+    assert.equal(await loadCoiList({ dataDir, minEntries: 1, fetchImpl: fail, now: () => Date.now() + 8 * 86400e3 }), null);
     fs.writeFileSync(path.join(dataDir, 'coi', 'rizikove-seznam.csv'), '\n');
-    assert.equal(await loadCoiList({ dataDir, fetchImpl: fail }), null, 'an empty cached copy is not used');
+    assert.equal(await loadCoiList({ dataDir, minEntries: 1, fetchImpl: fail }), null, 'an empty cached copy is not used');
 });
 
 const fakeSources = { ares: async () => ({ found: true, name: 'Firma s.r.o.' }), dph: async () => ({ generated: 'x', subjects: new Map() }), isir: async () => ({ cases: [] }) };
@@ -144,11 +144,23 @@ test('runAll: ČOI fails the self-check -> the saved list is used and dated; no 
     assert.equal(l2['45274649'].checks.coi.status, 'failed');
 });
 
+test('loadCoiList never uses or caches a partial or garbled list (omitted sites would look delisted)', async () => {
+    const dataDir = tmp(); const enc = (t) => async () => ({ ok: true, arrayBuffer: async () => new TextEncoder().encode(t).buffer });
+    const full = Array.from({ length: 60 }, (_, i) => `shop${i}.cz;'reason'`).join('\n');
+    const good = await loadCoiList({ dataDir, fetchImpl: enc(full) }); assert.equal(good.entries.length, 60);
+    const cut = await loadCoiList({ dataDir, fetchImpl: enc(full.split('\n').slice(0, 10).join('\n')) });
+    assert.equal(cut.stale, true); assert.equal(cut.entries.length, 60, 'cut-off download rejected, saved copy used');
+    const html = await loadCoiList({ dataDir, fetchImpl: enc(Array.from({ length: 60 }, () => '<div>Service unavailable</div>').join('\n')) });
+    assert.equal(html.entries.length, 60, 'error page rejected and not cached');
+    fs.writeFileSync(path.join(dataDir, 'coi', 'rizikove-seznam.csv'), "shop1.cz;'reason'\n");
+    assert.equal(await loadCoiList({ dataDir, cacheOnly: true }), null, 'a cut-off saved copy is not used');
+});
+
 test('loadCoiList cacheOnly never downloads', async () => {
     const dataDir = tmp(); let fetched = 0; const f = async (...a) => { fetched++; return okFetch(...a); };
-    assert.equal(await loadCoiList({ dataDir, fetchImpl: f, cacheOnly: true }), null);
-    await loadCoiList({ dataDir, fetchImpl: f }); assert.equal(fetched, 1);
-    const c = await loadCoiList({ dataDir, fetchImpl: f, cacheOnly: true });
+    assert.equal(await loadCoiList({ dataDir, minEntries: 1, fetchImpl: f, cacheOnly: true }), null);
+    await loadCoiList({ dataDir, minEntries: 1, fetchImpl: f }); assert.equal(fetched, 1);
+    const c = await loadCoiList({ dataDir, minEntries: 1, fetchImpl: f, cacheOnly: true });
     assert.equal(fetched, 1); assert.equal(c.stale, true); assert.equal(c.entries.length, 6);
 });
 
