@@ -687,7 +687,7 @@ STATUS_JS = """<script>
 (function(){var el=document.getElementById('sw-status');var N={ares:'ARES',vat:'VAT register',isir:'ISIR',coi:'ČOI risky e-shops'};
 fetch('/healthz?detail=1').then(function(r){return r.json()}).then(function(j){var s=j.sources;if(!s){el.innerHTML='<p class="muted">No self-check has run yet.</p>';return;}
 var t=new Date(s.checkedAt).toLocaleString('en-GB',{timeZone:'Europe/Prague'});var h='<p>Checked '+t+' (Prague time)</p><ul>';
-Object.keys(N).forEach(function(k){var d=s.detail&&s.detail[k];if(!d)return;h+='<li>'+N[k]+': '+(d.disabled?'<span class="muted">not used</span>':d.ok?'<span class="ok">OK</span>':'<span class="bad">FAILED</span> (affected checks are marked "not checked" today)')+'</li>';});
+Object.keys(N).forEach(function(k){var d=s.detail&&s.detail[k];if(!d)return;h+='<li>'+N[k]+': '+(d.disabled?'<span class="muted">not used</span>':d.ok?'<span class="ok">OK</span>':'<span class="bad">FAILED</span> '+(k==='coi'?'(our saved copy of the list is used if it is at most 7 days old, otherwise the check is marked "not checked" today)':'(affected checks are marked "not checked" today)'))+'</li>';});
 el.innerHTML=h+'</ul>';}).catch(function(){el.innerHTML='<p class="muted">Status unavailable.</p>';});})();
 </script>"""
 

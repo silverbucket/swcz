@@ -67,6 +67,8 @@ test('loadCoiList caches and falls back; tolerates failure', async () => {
     const c = await loadCoiList({ dataDir, fetchImpl: fail });
     assert.equal(c.stale, true); assert.equal(c.entries.length, 6);
     assert.equal(await loadCoiList({ dataDir, fetchImpl: fail, now: () => Date.now() + 8 * 86400e3 }), null);
+    fs.writeFileSync(path.join(dataDir, 'coi', 'rizikove-seznam.csv'), '\n');
+    assert.equal(await loadCoiList({ dataDir, fetchImpl: fail }), null, 'an empty cached copy is not used');
 });
 
 const fakeSources = { ares: async () => ({ found: true, name: 'Firma s.r.o.' }), dph: async () => ({ generated: 'x', subjects: new Map() }), isir: async () => ({ cases: [] }) };

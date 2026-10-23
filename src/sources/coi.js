@@ -79,9 +79,10 @@ export async function loadCoiList({ dataDir, fetchImpl = fetch, url = COI_URL, l
     } catch (e) {
         try {
             const st = fs.statSync(file);
-            if (now() - st.mtimeMs <= maxAgeMs) {
+            const entries = now() - st.mtimeMs <= maxAgeMs ? parseCsv(decode(fs.readFileSync(file))) : [];
+            if (entries.length) { // an empty or broken copy would read as "nothing listed" and clear yesterday's matches
                 log(`coi: download failed (${e.message}), using cache from ${st.mtime.toISOString()}`);
-                return { entries: parseCsv(decode(fs.readFileSync(file))), fetchedAt: st.mtime.toISOString(), stale: true };
+                return { entries, fetchedAt: st.mtime.toISOString(), stale: true };
             }
         } catch { /* no cache */ }
         log(`coi: download failed (${e.message}), no usable cache; ČOI check skipped`);
