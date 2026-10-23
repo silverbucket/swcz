@@ -152,6 +152,14 @@ test('loadCoiList never uses or caches a partial or garbled list (omitted sites 
     assert.equal(cut.stale, true); assert.equal(cut.entries.length, 60, 'cut-off download rejected, saved copy used');
     const html = await loadCoiList({ dataDir, fetchImpl: enc(Array.from({ length: 60 }, () => '<div>Service unavailable</div>').join('\n')) });
     assert.equal(html.entries.length, 60, 'error page rejected and not cached');
+    const text = await loadCoiList({ dataDir, fetchImpl: enc(Array.from({ length: 60 }, (_, i) => `Service unavailable at shop${i}.example.cz`).join('\n')) });
+    assert.equal(text.stale, true, 'error text ending in a domain is not a domain');
+    const half = await loadCoiList({ dataDir, fetchImpl: enc(full.split('\n').slice(0, 55).join('\n')) });
+    assert.equal(half.stale, false, 'a modest shrink is accepted');
+    const big = Array.from({ length: 200 }, (_, i) => `shop${i}.cz;'reason'`).join('\n');
+    await loadCoiList({ dataDir, fetchImpl: enc(big) });
+    const cut2 = await loadCoiList({ dataDir, fetchImpl: enc(big.split('\n').slice(0, 90).join('\n')) });
+    assert.equal(cut2.stale, true); assert.equal(cut2.entries.length, 200, 'under half the last good copy: taken as cut off');
     fs.writeFileSync(path.join(dataDir, 'coi', 'rizikove-seznam.csv'), "shop1.cz;'reason'\n");
     assert.equal(await loadCoiList({ dataDir, cacheOnly: true }), null, 'a cut-off saved copy is not used');
 });
