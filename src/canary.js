@@ -7,7 +7,7 @@ import path from 'node:path';
 import { getSubject } from './sources/ares.js';
 import { getStatuses } from './sources/dph.js';
 import { getByIco } from './sources/isir.js';
-import { fetchRiskyWebs } from './sources/coi.js';
+import { fetchRiskyWebs, listProblem } from './sources/coi.js';
 
 export const CANARY_ICO = '27082440'; // Alza.cz a.s.: large, long-standing VAT payer with published accounts
 export const SOURCE_NAMES = { ares: 'ARES business register', vat: 'VAT register (Financial Administration)', isir: 'Insolvency register ISIR', coi: 'ČOI risky e-shop list' };
@@ -34,28 +34,40 @@ export const PROBES = {
         must(r.cases.every((c) => typeof c.caseNo === 'string'), 'case number missing');
     },
     async coi({ coi = fetchRiskyWebs } = {}) {
-        const e = await coi();
-        must(Array.isArray(e) && e.length >= 50, `only ${e?.length ?? 0} entries`);
-        must(e.filter((x) => /\.[a-z]{2,}$/.test(x.domain)).length / e.length > 0.9, 'domains do not parse');
+        const bad = listProblem(await coi());
+        must(!bad, bad);
     },
 };
 
 export function statusFile(dataDir) { return path.join(dataDir, 'status.json'); }
 export function readStatus(dataDir) { try { return JSON.parse(fs.readFileSync(statusFile(dataDir), 'utf8')); } catch { return null; } }
 
-/** Run all probes. Returns { checkedAt, ok, sources: { ares: { ok, ms, error? } ... }, failed: [names] }. */
-export async function runCanary({ env = process.env, dataDir = env.DATA_DIR || 'data', probes = PROBES, deps = {}, mailer, log = () => {}, now = () => Date.now(), timeoutMs = 60000 } = {}) {
+/**
+ * Run all probes, in parallel. A probe that fails is tried again after each of retryDelaysMs (backing off, as a source
+ * in trouble often needs some minutes) so an outage shorter than ~20 minutes doesn't cost a whole day of checks. The
+ * customer checks wait for this, so a source that stays down delays them by the sum of the delays.
+ * Returns { checkedAt, ok, sources: { ares: { ok, ms, attempts?, error? } ... }, failed: [names] }.
+ */
+export async function runCanary({ env = process.env, dataDir = env.DATA_DIR || 'data', probes = PROBES, deps = {}, mailer, log = () => {}, now = () => Date.now(), timeoutMs = 60000, retryDelaysMs = [60e3, 300e3, 900e3] } = {}) {
     const sources = {};
-    for (const [name, probe] of Object.entries(probes)) {
-        if ((name === 'isir' && env.ISIR_DISABLED === '1') || (name === 'coi' && env.COI_DISABLED === '1')) { sources[name] = { ok: true, disabled: true }; continue; }
-        const t0 = now();
+    const once = async (probe) => {
         let timer;
-        try {
-            await Promise.race([probe(deps), new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`timeout after ${timeoutMs} ms`)), timeoutMs); })]);
-            sources[name] = { ok: true, ms: now() - t0 };
-        } catch (e) { sources[name] = { ok: false, ms: now() - t0, error: String(e.message).slice(0, 300) }; } finally { clearTimeout(timer); }
-    }
-    const failed = Object.keys(sources).filter((k) => !sources[k].ok);
+        try { await Promise.race([probe(deps), new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`timeout after ${timeoutMs} ms`)), timeoutMs); })]); } finally { clearTimeout(timer); }
+    };
+    await Promise.all(Object.entries(probes).map(async ([name, probe]) => {
+        if ((name === 'isir' && env.ISIR_DISABLED === '1') || (name === 'coi' && env.COI_DISABLED === '1')) { sources[name] = { ok: true, disabled: true }; return; }
+        for (let n = 1; ; n++) {
+            const t0 = now();
+            try { await once(probe); sources[name] = { ok: true, ms: now() - t0, ...(n > 1 ? { attempts: n } : {}) }; return; } catch (e) {
+                sources[name] = { ok: false, ms: now() - t0, attempts: n, error: String(e.message).slice(0, 300) };
+                const wait = retryDelaysMs[n - 1];
+                if (wait === undefined) return;
+                log(`canary: ${name} failed (${sources[name].error}), retrying in ${Math.round(wait / 1000)} s`);
+                await new Promise((r) => setTimeout(r, wait));
+            }
+        }
+    }));
+    const failed = Object.keys(probes).filter((k) => !sources[k].ok); // probe order, not finishing order
     const prev = readStatus(dataDir);
     const st = { checkedAt: new Date(now()).toISOString(), ok: failed.length === 0, sources, failed };
     fs.mkdirSync(dataDir, { recursive: true });
@@ -65,7 +77,7 @@ export async function runCanary({ env = process.env, dataDir = env.DATA_DIR || '
     const base = (env.BASE_URL || 'https://supplierwatch.cz').replace(/\/$/, '');
     if (mailer && failed.length) {
         await mailer.send({ to: ops, unsubscribeUrl: `${base}/`, subject: `Supplier Watch ops: data source self-check FAILED (${failed.join(', ')})`,
-            text: `The daily self-check failed for: ${failed.map((f) => `${SOURCE_NAMES[f] ?? f}`).join(', ')}.\n\n${failed.map((f) => `${f}: ${sources[f].error}`).join('\n')}\n\nToday's customer checks mark these sources as FAILED (no changes inferred, no "all clear").\nStatus: ${base}/healthz?detail=1` }).catch((e) => log(`canary mail failed: ${e.message}`));
+            text: `The daily self-check failed for: ${failed.map((f) => `${SOURCE_NAMES[f] ?? f}`).join(', ')}.\n\n${failed.map((f) => `${f}: ${sources[f].error} (${sources[f].attempts ?? 1} attempt${sources[f].attempts > 1 ? 's' : ''})`).join('\n')}\n\nToday's customer checks mark these sources as FAILED (no changes inferred, no "all clear").${failed.includes('coi') ? ' For ČOI, our saved copy of the list is used instead if it is at most 7 days old and passes the same checks (dated in the report); otherwise ČOI is FAILED too.' : ''}\nStatus: ${base}/healthz?detail=1` }).catch((e) => log(`canary mail failed: ${e.message}`));
     } else if (mailer && prev && prev.ok === false) {
         await mailer.send({ to: ops, unsubscribeUrl: `${base}/`, subject: 'Supplier Watch ops: all data sources OK again', text: `All data sources passed the self-check at ${st.checkedAt}.` }).catch(() => {});
     }

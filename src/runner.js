@@ -35,7 +35,7 @@ export async function runWatchlist(items, { name, statePath, outDir, isirEnabled
     });
     const at = new Date(now()).toISOString();
     const coiRun = coi !== undefined;
-    const records = reportItems.map((i) => recordFor(i, { at, list: history?.list ?? 'main', client: history?.client ?? null, isirEnabled, coiRun }));
+    const records = reportItems.map((i) => recordFor(i, { at, list: history?.list ?? 'main', client: history?.client ?? null, isirEnabled, coiRun, coiListDate: coi?.stale ? coi.fetchedAt : null }));
     const latest = { ...(prev.latest ?? {}) };
     for (const r of records) latest[r.ico] = r;
     for (const k of Object.keys(latest)) if (!onList.has(k)) delete latest[k];
@@ -47,7 +47,7 @@ export async function runWatchlist(items, { name, statePath, outDir, isirEnabled
     write(deferState ? kept : nextFacts);
     if (history) appendHistory(history.dataDir, history.accountId, records, new Date(now()));
     const result = { watchlist: name, firstRun, errors: res.errors, items: reportItems };
-    const text = buildReport(result, { watchlist: name, firstRun, coiUsed: !!coi && items.some((i) => i.website) });
+    const text = buildReport(result, { watchlist: name, firstRun, coiUsed: !!coi && items.some((i) => i.website), coiListDate: coi?.stale && items.some((i) => i.website) ? coi.fetchedAt : null });
     if (outDir) {
         fs.mkdirSync(outDir, { recursive: true });
         const stamp = new Date().toISOString().slice(0, 10);

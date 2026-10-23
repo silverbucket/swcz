@@ -58,31 +58,47 @@ export function matchDomain(entries, website) {
 }
 
 export const COI_MAX_CACHE_AGE_MS = 7 * 24 * 3600e3;
+export const COI_MIN_ENTRIES = 50; // the real list has well over 1,000; fewer means an error page or a cut-off file
+
+const HOST = /^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/; // every entry of the real list matches
+
+/**
+ * Why a parsed list can't be trusted (a partial list would make omitted sites look delisted), or null if it looks whole.
+ * prevCount: entries in the last good copy; a list under half that size is taken as cut off (the real one changes slowly).
+ */
+export function listProblem(entries, minEntries = COI_MIN_ENTRIES, prevCount = 0) {
+    if (!Array.isArray(entries) || entries.length < minEntries) return `only ${entries?.length ?? 0} entries`;
+    if (entries.filter((x) => HOST.test(x.domain)).length / entries.length <= 0.9) return 'domains do not parse';
+    if (entries.length < prevCount / 2) return `only ${entries.length} entries, last good copy had ${prevCount}`;
+    return null;
+}
 
 /**
  * Download the list once and cache the raw file in <dataDir>/coi/. If the download fails, fall back
  * to a cached copy younger than maxAgeMs; otherwise return null (callers then skip the ČOI check
- * and infer no changes). Never throws.
+ * and infer no changes). A list that fails listProblem() is never used or cached. cacheOnly: don't download, only use the cache (today's self-check failed). Never throws.
  */
-export async function loadCoiList({ dataDir, fetchImpl = fetch, url = COI_URL, log = () => {}, now = () => Date.now(), maxAgeMs = COI_MAX_CACHE_AGE_MS } = {}) {
+export async function loadCoiList({ dataDir, fetchImpl = fetch, url = COI_URL, log = () => {}, now = () => Date.now(), maxAgeMs = COI_MAX_CACHE_AGE_MS, cacheOnly = false, minEntries = COI_MIN_ENTRIES } = {}) {
     const dir = path.join(dataDir, 'coi'); const file = path.join(dir, 'rizikove-seznam.csv');
+    // The saved copy, if young enough: the fallback, and the size a fresh download is compared with.
+    let cached = null;
+    try { const st = fs.statSync(file); if (now() - st.mtimeMs <= maxAgeMs) cached = { entries: parseCsv(decode(fs.readFileSync(file))), fetchedAt: st.mtime.toISOString() }; } catch { /* no cache */ }
+    if (cached && listProblem(cached.entries, minEntries)) cached = null;
     try {
+        if (cacheOnly) throw new Error('self-check failed');
         const res = await fetchImpl(url, { headers: { 'User-Agent': 'supplierwatch.cz' }, signal: AbortSignal.timeout(30000) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const buf = new Uint8Array(await res.arrayBuffer());
         const entries = parseCsv(decode(buf));
-        if (!entries.length) throw new Error('empty list');
+        const bad = listProblem(entries, minEntries, cached?.entries.length); if (bad) throw new Error(`unusable list: ${bad}`); // never replaces a good cache
         fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(`${file}.tmp`, buf); fs.renameSync(`${file}.tmp`, file);
         return { entries, fetchedAt: new Date(now()).toISOString(), stale: false };
     } catch (e) {
-        try {
-            const st = fs.statSync(file);
-            if (now() - st.mtimeMs <= maxAgeMs) {
-                log(`coi: download failed (${e.message}), using cache from ${st.mtime.toISOString()}`);
-                return { entries: parseCsv(decode(fs.readFileSync(file))), fetchedAt: st.mtime.toISOString(), stale: true };
-            }
-        } catch { /* no cache */ }
+        if (cached) {
+            log(`coi: download failed (${e.message}), using cache from ${cached.fetchedAt}`);
+            return { ...cached, stale: true };
+        }
         log(`coi: download failed (${e.message}), no usable cache; ČOI check skipped`);
         return null;
     }

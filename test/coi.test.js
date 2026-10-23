@@ -60,13 +60,15 @@ test('accounts store websites only for kept suppliers', () => {
 test('loadCoiList caches and falls back; tolerates failure', async () => {
     const dataDir = tmp(); const logs = [];
     const fail = async () => { throw new Error('ECONNREFUSED'); };
-    assert.equal(await loadCoiList({ dataDir, fetchImpl: fail, log: (m) => logs.push(m) }), null);
-    const l = await loadCoiList({ dataDir, fetchImpl: okFetch });
+    assert.equal(await loadCoiList({ dataDir, minEntries: 1, fetchImpl: fail, log: (m) => logs.push(m) }), null);
+    const l = await loadCoiList({ dataDir, minEntries: 1, fetchImpl: okFetch });
     assert.equal(l.entries.length, 6); assert.equal(l.stale, false);
     assert.ok(fs.existsSync(path.join(dataDir, 'coi', 'rizikove-seznam.csv')));
-    const c = await loadCoiList({ dataDir, fetchImpl: fail });
+    const c = await loadCoiList({ dataDir, minEntries: 1, fetchImpl: fail });
     assert.equal(c.stale, true); assert.equal(c.entries.length, 6);
-    assert.equal(await loadCoiList({ dataDir, fetchImpl: fail, now: () => Date.now() + 8 * 86400e3 }), null);
+    assert.equal(await loadCoiList({ dataDir, minEntries: 1, fetchImpl: fail, now: () => Date.now() + 8 * 86400e3 }), null);
+    fs.writeFileSync(path.join(dataDir, 'coi', 'rizikove-seznam.csv'), '\n');
+    assert.equal(await loadCoiList({ dataDir, minEntries: 1, fetchImpl: fail }), null, 'an empty cached copy is not used');
 });
 
 const fakeSources = { ares: async () => ({ found: true, name: 'Firma s.r.o.' }), dph: async () => ({ generated: 'x', subjects: new Map() }), isir: async () => ({ cases: [] }) };
@@ -117,6 +119,57 @@ test('runAll: one download per run, alert email with ČOI credit, failure does n
     list = { entries: [] };
     await runAll(base);
     assert.match(sent.at(-1).text, /removed from the ČOI list/);
+});
+
+test('runAll: ČOI fails the self-check -> the saved list is used and dated; no saved list -> failed', async () => {
+    const dataDir = tmp();
+    const acc = new Accounts(path.join(dataDir, 'accounts.json'));
+    const { account } = acc.signup('a@x.cz', ['27082440', '45274649'], { consentText: 'c', websites: { 27082440: 'clarkscz.cz', 45274649: 'clean.cz' } });
+    account.confirmed = true; acc.save();
+    const check = (items, o) => checkWatchlist(items, { ...o, sources: fakeSources });
+    const sent = []; const mailer = { send: async (m) => { sent.push(m); } };
+    const canary = async () => ({ ok: false, failed: ['coi'] });
+    const opts = []; let list = { entries: parseCsv(decode(buf)), fetchedAt: '2026-10-20T04:30:00.000Z', stale: true };
+    const loadCoi = async (o) => { opts.push(o); return list; };
+    const base = { env: {}, dataDir, mailer, check, log: () => {}, isirEnabled: false, loadCoi, canary };
+    await runAll(base);
+    assert.equal(opts.length, 1); assert.equal(opts[0].cacheOnly, true, 'no download after a failed self-check');
+    const latest = JSON.parse(fs.readFileSync(path.join(dataDir, 'state', `${account.id}.json`), 'utf8')).latest;
+    assert.equal(latest['27082440'].checks.coi.status, 'alert'); assert.match(latest['27082440'].checks.coi.detail, /saved list from 2026-10-20/);
+    assert.equal(latest['45274649'].checks.coi.status, 'ok');
+    assert.match(sent[0].text, /saved copy from 2026-10-20/); assert.doesNotMatch(sent[0].text, /NOT CHECKED/);
+    list = null;
+    await runAll(base);
+    const l2 = JSON.parse(fs.readFileSync(path.join(dataDir, 'state', `${account.id}.json`), 'utf8')).latest;
+    assert.equal(l2['45274649'].checks.coi.status, 'failed');
+});
+
+test('loadCoiList never uses or caches a partial or garbled list (omitted sites would look delisted)', async () => {
+    const dataDir = tmp(); const enc = (t) => async () => ({ ok: true, arrayBuffer: async () => new TextEncoder().encode(t).buffer });
+    const full = Array.from({ length: 60 }, (_, i) => `shop${i}.cz;'reason'`).join('\n');
+    const good = await loadCoiList({ dataDir, fetchImpl: enc(full) }); assert.equal(good.entries.length, 60);
+    const cut = await loadCoiList({ dataDir, fetchImpl: enc(full.split('\n').slice(0, 10).join('\n')) });
+    assert.equal(cut.stale, true); assert.equal(cut.entries.length, 60, 'cut-off download rejected, saved copy used');
+    const html = await loadCoiList({ dataDir, fetchImpl: enc(Array.from({ length: 60 }, () => '<div>Service unavailable</div>').join('\n')) });
+    assert.equal(html.entries.length, 60, 'error page rejected and not cached');
+    const text = await loadCoiList({ dataDir, fetchImpl: enc(Array.from({ length: 60 }, (_, i) => `Service unavailable at shop${i}.example.cz`).join('\n')) });
+    assert.equal(text.stale, true, 'error text ending in a domain is not a domain');
+    const half = await loadCoiList({ dataDir, fetchImpl: enc(full.split('\n').slice(0, 55).join('\n')) });
+    assert.equal(half.stale, false, 'a modest shrink is accepted');
+    const big = Array.from({ length: 200 }, (_, i) => `shop${i}.cz;'reason'`).join('\n');
+    await loadCoiList({ dataDir, fetchImpl: enc(big) });
+    const cut2 = await loadCoiList({ dataDir, fetchImpl: enc(big.split('\n').slice(0, 90).join('\n')) });
+    assert.equal(cut2.stale, true); assert.equal(cut2.entries.length, 200, 'under half the last good copy: taken as cut off');
+    fs.writeFileSync(path.join(dataDir, 'coi', 'rizikove-seznam.csv'), "shop1.cz;'reason'\n");
+    assert.equal(await loadCoiList({ dataDir, cacheOnly: true }), null, 'a cut-off saved copy is not used');
+});
+
+test('loadCoiList cacheOnly never downloads', async () => {
+    const dataDir = tmp(); let fetched = 0; const f = async (...a) => { fetched++; return okFetch(...a); };
+    assert.equal(await loadCoiList({ dataDir, minEntries: 1, fetchImpl: f, cacheOnly: true }), null);
+    await loadCoiList({ dataDir, minEntries: 1, fetchImpl: f }); assert.equal(fetched, 1);
+    const c = await loadCoiList({ dataDir, minEntries: 1, fetchImpl: f, cacheOnly: true });
+    assert.equal(fetched, 1); assert.equal(c.stale, true); assert.equal(c.entries.length, 6);
 });
 
 test('signup/manage forms accept and show websites', async () => {

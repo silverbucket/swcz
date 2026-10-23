@@ -30,7 +30,7 @@ const T = {
 const t = (k) => T[k] ?? [k, k];
 const SRC_NAME = { ares: 'ARES', dph: 'VAT register / registr DPH', isir: 'ISIR', coi: 'ČOI' };
 
-export function buildReport(result, { watchlist = 'watchlist', firstRun = false, coiUsed = false } = {}) {
+export function buildReport(result, { watchlist = 'watchlist', firstRun = false, coiUsed = false, coiListDate = null } = {}) {
     const items = result.items;
     const flagged = items.filter((i) => i.alerts.length || i.changes.length);
     const lines = [];
@@ -56,6 +56,11 @@ export function buildReport(result, { watchlist = 'watchlist', firstRun = false,
     const failedSrc = Object.entries(result.errors ?? {}).filter(([, n]) => n).map(([k]) => SRC_NAME[k] ?? k);
     if (failedSrc.length) {
         lines.push(`! NOT CHECKED today (source failed): ${failedSrc.join(', ')}. This is NOT an all-clear for these checks. / NEZKONTROLOVÁNO (výpadek zdroje): ${failedSrc.join(', ')}. Nejde o potvrzení, že je vše v pořádku.`);
+        lines.push('');
+    }
+    if (coiListDate) {
+        const d = coiListDate.slice(0, 10);
+        lines.push(`ČOI list could not be downloaded today; websites were checked against the saved copy from ${d}. / Seznam ČOI dnes nešlo stáhnout; weby byly porovnány s uloženou kopií z ${d}.`);
         lines.push('');
     }
     if (!flagged.length) lines.push(failedSrc.length ? 'No alerts or changes in the sources that answered. / Žádná upozornění ani změny ve zdrojích, které odpověděly.' : 'No alerts or changes. / Žádná upozornění ani změny.');

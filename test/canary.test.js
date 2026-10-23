@@ -31,16 +31,31 @@ test('runCanary: writes status, emails OPS_EMAIL on failure and on recovery, ski
     const dataDir = tmp('swcan-'); const { sent, mailer } = mailbox();
     let st = await runCanary({ env: { OPS_EMAIL: 'ops@x.cz' }, dataDir, deps: good, mailer });
     assert.equal(st.ok, true); assert.equal(sent.length, 0); assert.deepEqual(readStatus(dataDir).failed, []);
-    st = await runCanary({ env: { OPS_EMAIL: 'ops@x.cz' }, dataDir, deps: { ...good, isir: async () => { throw new Error('isir.justice.cz: ETIMEDOUT'); } }, mailer });
+    st = await runCanary({ env: { OPS_EMAIL: 'ops@x.cz' }, dataDir, deps: { ...good, isir: async () => { throw new Error('isir.justice.cz: ETIMEDOUT'); } }, mailer, retryDelaysMs: [0, 0, 0] });
     assert.equal(st.ok, false); assert.deepEqual(st.failed, ['isir']); assert.equal(sent.length, 1);
-    assert.equal(sent[0].to, 'ops@x.cz'); assert.match(sent[0].subject, /FAILED \(isir\)/); assert.match(sent[0].text, /ETIMEDOUT/);
+    assert.equal(sent[0].to, 'ops@x.cz'); assert.match(sent[0].subject, /FAILED \(isir\)/); assert.match(sent[0].text, /ETIMEDOUT \(4 attempts\)/); assert.equal(st.sources.isir.attempts, 4);
     assert.deepEqual(skipFrom(st), { isir: true });
     st = await runCanary({ env: {}, dataDir, deps: good, mailer }); assert.equal(sent.length, 2); assert.equal(sent[1].to, 'contact@supplierwatch.cz', 'default ops address'); assert.match(sent[1].subject, /OK again/);
     st = await runCanary({ env: { ISIR_DISABLED: '1', COI_DISABLED: '1' }, dataDir, deps: { ...good, isir: async () => { throw new Error('x'); } }, mailer });
     assert.equal(st.ok, true); assert.equal(st.sources.isir.disabled, true);
     assert.deepEqual(skipFrom({ failed: ['vat', 'ares'] }), { dph: true, ares: true });
-    st = await runCanary({ env: {}, dataDir, deps: good, timeoutMs: 20, probes: { ...PROBES, ares: () => new Promise(() => {}) } });
+    st = await runCanary({ env: {}, dataDir, deps: good, timeoutMs: 20, retryDelaysMs: [0, 0, 0], probes: { ...PROBES, ares: () => new Promise(() => {}) } });
     assert.match(st.sources.ares.error, /timeout/);
+});
+
+test('runCanary retries a failed probe: a short blip is not a failure, a lasting one is', async () => {
+    const dataDir = tmp('swcan4-'); const { sent, mailer } = mailbox();
+    let calls = 0; const flaky = async () => { if (++calls < 3) throw new Error('fetch failed'); return good.coi(); };
+    let st = await runCanary({ env: {}, dataDir, deps: { ...good, coi: flaky }, mailer, retryDelaysMs: [0, 0, 0] });
+    assert.equal(st.ok, true); assert.equal(calls, 3); assert.equal(st.sources.coi.attempts, 3); assert.equal(st.sources.ares.attempts, undefined);
+    assert.equal(sent.length, 0);
+    calls = 0; st = await runCanary({ env: {}, dataDir, deps: { ...good, coi: async () => { calls++; throw new Error('fetch failed'); } }, mailer, retryDelaysMs: [0] });
+    assert.deepEqual(st.failed, ['coi']); assert.equal(calls, 2);
+    assert.match(sent[0].text, /coi: fetch failed \(2 attempts\)/);
+    // probes run in parallel: a slow source doesn't hold up the others, and `failed` keeps probe order
+    const order = []; const slow = (k, ms, fail) => async () => { await new Promise((r) => setTimeout(r, ms)); order.push(k); if (fail) throw new Error('down'); return good[k === 'vat' ? 'dph' : k](CANARY_ICO); };
+    st = await runCanary({ env: {}, dataDir, deps: { ares: slow('ares', 30, true), dph: slow('vat', 1), isir: slow('isir', 1, true), coi: slow('coi', 1) }, retryDelaysMs: [], probes: { ares: (d) => d.ares(), vat: (d) => d.dph(), isir: (d) => d.isir(), coi: (d) => d.coi() } });
+    assert.equal(order.at(-1), 'ares'); assert.deepEqual(st.failed, ['ares', 'isir']); assert.match(sent[0].text, /saved copy of the list is used instead/);
 });
 
 test('a source that fails the self-check is marked NOT CHECKED for customers: no false all-clear, no inferred change', async () => {
@@ -74,7 +89,7 @@ test('/healthz stays minimal; /healthz?detail=1 shows version and the self-check
     try {
         assert.deepEqual(await (await fetch(`${url}/healthz`)).json(), { ok: true });
         let j = await (await fetch(`${url}/healthz?detail=1`)).json(); assert.equal(j.sources, null); assert.equal(j.version, '0.7.0');
-        await runCanary({ env: {}, dataDir, deps: { ...good, coi: async () => [] } });
+        await runCanary({ env: {}, dataDir, deps: { ...good, coi: async () => [] }, retryDelaysMs: [0, 0, 0] });
         j = await (await fetch(`${url}/healthz?detail=1`)).json(); assert.equal(j.sources.ok, false); assert.deepEqual(j.sources.failed, ['coi']); assert.equal(j.sources.detail.ares.ok, true);
     } finally { srv.close(); }
 });

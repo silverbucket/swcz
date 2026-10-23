@@ -45,9 +45,16 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
     const doCheck = check ?? ((items, o) => checkWatchlist(items, { ...o, sources: shared }));
     const baseUrl = (env.BASE_URL || 'https://supplierwatch.cz').replace(/\/$/, '');
     await selfCheck();
-    // ČOI list: downloaded at most once per run, and only if some active account has a website.
+    // ČOI list: downloaded at most once per run, and only if some active account has a website. If the list failed
+    // today's self-check, the cached copy (at most COI_MAX_CACHE_AGE_MS old, dated in the report) is used instead; the
+    // list changes slowly, unlike the registers. Without a usable copy the check is marked failed.
     let coi; let coiLoaded = false;
-    const getCoi = async () => { if (!coiLoaded) { coiLoaded = true; coi = skip.coi ? null : await loadCoi({ dataDir, log }).catch(() => null); } return coi; };
+    const getCoi = async () => {
+        if (coiLoaded) return coi;
+        coiLoaded = true; coi = await loadCoi({ dataDir, log, cacheOnly: Boolean(skip.coi) }).catch(() => null);
+        if (coi && skip.coi) { log(`coi: self-check failed, using the cached list from ${coi.fetchedAt}`); const { coi: _, ...rest } = skip; skip = rest; }
+        return coi;
+    };
     const stateDir = path.join(dataDir, 'state'); const stateFiles = fs.existsSync(stateDir) ? fs.readdirSync(stateDir) : [];
     // Accounts are re-read before each list and each email (acc.fresh): an unsubscribe or deletion request made while
     // this run is under way stops register requests and emails for that account at once.
@@ -70,8 +77,9 @@ export async function runAll({ env = process.env, dataDir = env.DATA_DIR || 'dat
             const items = l.icos.map((ico) => ({ ico, label: null, expectedAccount: null, website: l.websites?.[ico] ?? null }));
             const name = l.clientId ? `${a.id}--${l.clientId}` : a.id;
             try {
+                const coiList = coiEnabled && items.some((i) => i.website) ? await getCoi() : undefined; // before `skip` is read below
                 const r = await runWatchlist(items, { name, statePath: path.join(dataDir, 'state', `${name}.json`), outDir: path.join(dataDir, 'reports'), isirEnabled, log, check: doCheck, skip, now, deferState: true, saved: l.clientId ? a.clients.find((c) => c.id === l.clientId).icos : a.icos,
-                    coi: coiEnabled && items.some((i) => i.website) ? await getCoi() : undefined, history: { dataDir, accountId: a.id, list: l.key, client: l.name } });
+                    coi: coiList, history: { dataDir, accountId: a.id, list: l.key, client: l.name } });
                 summary.checked++;
                 // Re-read right before every email: an unsubscribe (owner or recipient), a removed recipient or a deletion
                 // request made during the register requests or an earlier send stops it.
