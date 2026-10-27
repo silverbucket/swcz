@@ -13,9 +13,9 @@ export function createMailer(env = process.env) {
         dry, outbox,
         /** Log in to the SMTP server without sending (health check). */
         async verify() { if (dry) return { dry: true }; await transport.verify(); return { ok: true }; },
-        async send({ to, subject, text, unsubscribeUrl, attachments }) {
-            const body = `${text}\n\n--\nUnsubscribe / Odhlásit: ${unsubscribeUrl}\n`;
-            const msg = { from, replyTo, to, subject, text: body, html: renderHtml({ subject, text, unsubscribeUrl }), headers: { 'List-Unsubscribe': `<${unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } };
+        async send({ to, subject, text, unsubscribeUrl, manageUrl, attachments }) {
+            const body = `${text}\n\n--\n${manageUrl ? `Manage your account / Správa účtu: ${manageUrl}\n` : ''}Unsubscribe / Odhlásit: ${unsubscribeUrl}\n`;
+            const msg = { from, replyTo, to, subject, text: body, html: renderHtml({ subject, text, unsubscribeUrl, manageUrl }), headers: { 'List-Unsubscribe': `<${unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' } };
             if (attachments?.length) msg.attachments = attachments;
             if (dry) {
                 fs.mkdirSync(outbox, { recursive: true });
@@ -41,7 +41,7 @@ export function linkify(line) {
     }).join('');
 }
 /** Simple inline-styled HTML version of a plain-text email. No images, no tracking. */
-export function renderHtml({ subject, text, unsubscribeUrl }) {
+export function renderHtml({ subject, text, unsubscribeUrl, manageUrl }) {
     const rows = String(text).split('\n').map((l) => {
         const t = l.trim();
         if (!t) return '<div style="height:10px"></div>';
@@ -60,6 +60,6 @@ export function renderHtml({ subject, text, unsubscribeUrl }) {
 ${rows}
 </div>
 <p style="font-size:12px;color:#666;text-align:center;margin:14px 0">Questions? Reply to this email or write to <a href="mailto:contact@supplierwatch.cz" style="color:#0b5cad">contact@supplierwatch.cz</a>.<br>
-<a href="${escHtml(unsubscribeUrl)}" style="color:#0b5cad">Unsubscribe / Odhlásit</a> · <a href="https://supplierwatch.cz/" style="color:#0b5cad">supplierwatch.cz</a></p>
+${manageUrl ? `<a href="${escHtml(manageUrl)}" style="color:#0b5cad">Manage your account / Správa účtu</a> · ` : ''}<a href="${escHtml(unsubscribeUrl)}" style="color:#0b5cad">Unsubscribe / Odhlásit</a> · <a href="https://supplierwatch.cz/" style="color:#0b5cad">supplierwatch.cz</a></p>
 </div></body></html>`;
 }

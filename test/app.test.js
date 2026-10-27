@@ -367,3 +367,13 @@ test('review fixes: a supplier removed from a client list paused by a downgrade 
     assert.equal(JSON.parse(fs.readFileSync(path.join(m.outbox, left.find((f) => f.endsWith('.json'))), 'utf8')).to, 'other@x.cz');
     pruneHistory(dataDir, 24, new Date(Date.now() + 31 * 864e5)); assert.deepEqual(fs.readdirSync(m.outbox), [], 'outbox mail goes after 30 days');
 });
+test('email-footer manage tokens open the manage page for 30 days only', async () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'swmt-')); let t0 = Date.now();
+    const acc = new Accounts(path.join(d, 'accounts.json'), { now: () => t0 });
+    const { account } = acc.signup('m@firma.cz', ['27082440'], { consentText: 'x' }); acc.save();
+    const url = acc.manageUrl(account, 'https://supplierwatch.cz'); const t = new URL(url).searchParams.get('t');
+    assert.ok(url.startsWith('https://supplierwatch.cz/manage?t='));
+    assert.equal(acc.use(t, 'manage')?.id, account.id); assert.equal(acc.use(t, 'confirm'), null);
+    t0 += 29 * 864e5; assert.equal(acc.use(t, 'manage')?.id, account.id);
+    t0 += 2 * 864e5; assert.equal(acc.use(t, 'manage'), null);
+});

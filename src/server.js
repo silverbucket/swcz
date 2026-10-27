@@ -258,7 +258,7 @@ ${reportsHtml(a, t, c.id)}
             const acc = new Accounts(accFile, { now });
             const { account, confirmToken } = acc.signup(email, icos, { consentText: CONSENT_TEXT, websites, updatesOptIn: f.updates_optin === 'yes', acq: parseAcq(f.acq) }); acc.save();
             if (!cooldown("signup", email)) {
-                await mailer.send({ to: email, unsubscribeUrl: unsubUrl(account), subject: 'Confirm your Supplier Watch sign-up / Potvrďte registraci',
+                await mailer.send({ to: email, unsubscribeUrl: unsubUrl(account), manageUrl: acc.manageUrl(account, baseUrl), subject: 'Confirm your Supplier Watch sign-up / Potvrďte registraci',
                     text: `Please confirm your email to start daily supplier checks (link valid 48 hours):\nPotvrďte prosím e-mail pro spuštění denních kontrol (odkaz platí 48 hodin):\n\n${baseUrl}/confirm?t=${confirmToken}&mtm_campaign=confirm-email\n\nYou can cancel anytime from your manage page (the link is in every email) using the Manage billing button. Your plan stays active until the end of the paid period, then moves to the free plan.\nTarif můžete kdykoli zrušit na stránce správy účtu (odkaz najdete v každém e-mailu) tlačítkem Správa plateb. Tarif zůstane aktivní do konce zaplaceného období, poté přejde na bezplatný.\n\nIf you did not sign up, ignore this email. / Pokud jste se neregistrovali, e-mail ignorujte.` });
             }
             const capped = icos.length > PLANS.free ? `<p>The free plan covers ${PLANS.free} suppliers; the first ${PLANS.free} were kept. You can upgrade after confirming.</p>` : '';
@@ -297,7 +297,7 @@ ${reportsHtml(a, t, c.id)}
             const email = normEmail(form().email); const acc = new Accounts(accFile, { now }); const a = acc.byEmail(email);
             if (a?.confirmed && !cooldown("manage", email)) {
                 const t = acc.issue(a.id, 'manage'); acc.save();
-                await mailer.send({ to: a.email, unsubscribeUrl: unsubUrl(a), subject: 'Edit your Supplier Watch list / Úprava seznamu', text: `Edit your supplier list (link valid 24 hours):\nÚprava seznamu dodavatelů (platí 24 hodin):\n\n${baseUrl}/manage?t=${t}&mtm_campaign=manage-link` });
+                await mailer.send({ to: a.email, unsubscribeUrl: unsubUrl(a), manageUrl: acc.manageUrl(a, baseUrl), subject: 'Edit your Supplier Watch list / Úprava seznamu', text: `Edit your supplier list (link valid 24 hours):\nÚprava seznamu dodavatelů (platí 24 hodin):\n\n${baseUrl}/manage?t=${t}&mtm_campaign=manage-link` });
             }
             return send(200, page('Check your email', '<p>If that address has an account, we sent it a link. / Pokud účet existuje, poslali jsme odkaz.</p>', { events: [ev('Account', 'manage-link-requested')] }));
         }
@@ -329,7 +329,7 @@ ${reportsHtml(a, t, c.id)}
                 if (acc.liveSubscription(a) && !a.cancelAt) return send(400, manageHtml(acc, a, t, '<p class="sw-err">Cancel your paid plan first. / Nejprve zrušte placený tarif.</p>'));
                 const when = acc.scheduleDeletion(a).slice(0, 10); acc.save(); log(`deletion requested: ${a.id} on ${when}`);
                 try {
-                    await mailer.send({ to: a.email, unsubscribeUrl: unsubUrl(a), subject: 'Your Supplier Watch account will be deleted / Účet bude smazán',
+                    await mailer.send({ to: a.email, unsubscribeUrl: unsubUrl(a), manageUrl: acc.manageUrl(a, baseUrl), subject: 'Your Supplier Watch account will be deleted / Účet bude smazán',
                         text: `Your Supplier Watch account (${a.email}) and all its data will be deleted on ${when}. Daily checks and emails have stopped.\nTo keep your account, request a link at ${baseUrl}/#manage and click "Keep my account".\n\nVáš účet Supplier Watch (${a.email}) a všechna jeho data budou smazány ${when}. Kontroly a e-maily jsou zastaveny.\nPokud chcete účet ponechat, vyžádejte si odkaz na ${baseUrl}/#manage a klikněte na „Ponechat účet“.` });
                 } catch (e) { log(`deletion mail failed for ${a.id}: ${e.message}`); }
                 return send(200, manageHtml(acc, a, t, '<p><strong>Deletion scheduled. We sent you a confirmation email. / Smazání naplánováno.</strong></p>', { events: [ev('Account', 'account-delete-requested', a.plan)] }));

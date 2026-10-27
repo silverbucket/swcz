@@ -103,7 +103,7 @@ export async function sendMonthlyReports({ dataDir, acc, mailer, baseUrl, now = 
         if (!recs.length) continue;
         try {
             const buf = getReport(dataDir, cur, month, { now });
-            await mailer.send({ to: cur.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${cur.unsubToken}`, subject: `Supplier Watch: your ${monthLabel(month)} supplier check report / Měsíční protokol`,
+            await mailer.send({ to: cur.email, unsubscribeUrl: `${baseUrl}/unsubscribe?t=${cur.unsubToken}`, manageUrl: acc.manageUrl(cur, baseUrl), subject: `Supplier Watch: your ${monthLabel(month)} supplier check report / Měsíční protokol`,
                 text: `Your monthly supplier check report for ${monthLabel(month)} is attached (PDF). It lists every check we ran, per supplier, with results and times. Keep it with your records as evidence that you checked your suppliers.\nV příloze je měsíční protokol o kontrolách dodavatelů za ${month}.\n\nYou can also download reports from your manage page: ${baseUrl}/#manage`,
                 attachments: [{ filename: `supplierwatch-report-${month}.pdf`, content: buf, contentType: 'application/pdf' }] });
             sent++;

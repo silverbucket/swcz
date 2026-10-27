@@ -88,7 +88,7 @@ test('/healthz stays minimal; /healthz?detail=1 shows version and the self-check
     const dataDir = tmp('swcan3-'); const srv = createServer({ dataDir, mailer: mailbox().mailer, log: () => {} }); const url = await listen(srv);
     try {
         assert.deepEqual(await (await fetch(`${url}/healthz`)).json(), { ok: true });
-        let j = await (await fetch(`${url}/healthz?detail=1`)).json(); assert.equal(j.sources, null); assert.equal(j.version, '0.7.0');
+        let j = await (await fetch(`${url}/healthz?detail=1`)).json(); assert.equal(j.sources, null); assert.equal(j.version, '0.7.1');
         await runCanary({ env: {}, dataDir, deps: { ...good, coi: async () => [] }, retryDelaysMs: [0, 0, 0] });
         j = await (await fetch(`${url}/healthz?detail=1`)).json(); assert.equal(j.sources.ok, false); assert.deepEqual(j.sources.failed, ['coi']); assert.equal(j.sources.detail.ares.ok, true);
     } finally { srv.close(); }

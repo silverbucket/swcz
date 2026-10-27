@@ -10,7 +10,8 @@ import { parseText as parseCsvText, looksLikeCsv } from './csv.js';
 
 import { PLANS, PLAN_BY_AMOUNT, PLAN_INFO, MAX_CLIENTS } from './plans.js';
 export { PLANS };
-export const TOKEN_TTL_MS = { confirm: 48 * 3600e3, manage: 24 * 3600e3 };
+// mail: the manage link in every email footer; longer lived so older emails still work, valid only on the manage page.
+export const TOKEN_TTL_MS = { confirm: 48 * 3600e3, manage: 24 * 3600e3, mail: 30 * 864e5 };
 export const DELETE_GRACE_DAYS = 30;
 const token = () => crypto.randomBytes(24).toString('base64url');
 const hash = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
@@ -179,11 +180,14 @@ export class Accounts {
     }
     // Tokens are written straight to the database (no save() needed).
     issue(accountId, kind) { const t = token(); this.sql.prepare('INSERT INTO tokens VALUES (?, ?, ?, ?)').run(hash(t), accountId, kind, this.now() + TOKEN_TTL_MS[kind]); this.prune(); return t; }
+    /** Manage-page URL for an email footer (a fresh 'mail' token per email). */
+    manageUrl(a, baseUrl) { return `${baseUrl}/manage?t=${this.issue(a.id, 'mail')}`; }
     prune() { this.sql.prepare('DELETE FROM tokens WHERE exp < ?').run(this.now()); }
     /** Look up a token; confirm tokens are single use, manage tokens stay valid until expiry. */
     use(t, kind) {
         const h = hash(t); const rec = this.sql.prepare('SELECT account_id, kind, exp FROM tokens WHERE hash = ?').get(h);
-        if (!rec || rec.kind !== kind || rec.exp < this.now()) return null;
+        const kindOk = rec?.kind === kind || (kind === 'manage' && rec?.kind === 'mail');
+        if (!rec || !kindOk || rec.exp < this.now()) return null;
         if (kind === 'confirm' && !this.sql.prepare('DELETE FROM tokens WHERE hash = ?').run(h).changes) return null;
         return this.get(rec.account_id);
     }

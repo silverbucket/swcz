@@ -1,6 +1,6 @@
 {
   "name": "supplier-risk-monitor-cz",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Daily checks of Czech suppliers in official registers: VAT unreliable-payer status and published bank accounts (Financial Administration), insolvency (ISIR), and the ARES business register. Reports changes in English and Czech.",
   "type": "module",
   "bin": {

@@ -22,3 +22,14 @@ test('outbox message is multipart with List-Unsubscribe', async () => {
     assert.ok(msg.text.includes('https://u')); assert.ok(msg.html.includes('href="https://supplierwatch.cz/#manage"'));
     assert.equal(msg.headers['List-Unsubscribe'], '<https://u>');
 });
+test('footer carries the manage link next to unsubscribe when given', () => {
+    const h = renderHtml({ subject: 'S', text: 'x', unsubscribeUrl: 'https://supplierwatch.cz/unsubscribe?t=u', manageUrl: 'https://supplierwatch.cz/manage?t=m' });
+    assert.ok(h.includes('href="https://supplierwatch.cz/manage?t=m"') && h.includes('Manage your account / Správa účtu'));
+    assert.ok(!renderHtml({ subject: 'S', text: 'x', unsubscribeUrl: 'u' }).includes('Správa účtu'));
+});
+test('plain-text footer includes the manage link', async () => {
+    const dir = fs.mkdtempSync('/tmp/swmail-'); const m = createMailer({ DATA_DIR: dir });
+    await m.send({ to: 'a@b.cz', subject: 'S', text: 'x', unsubscribeUrl: 'https://u', manageUrl: 'https://supplierwatch.cz/manage?t=m' });
+    const f = fs.readdirSync(`${dir}/outbox`).find((n) => n.endsWith('.json')); const msg = JSON.parse(fs.readFileSync(`${dir}/outbox/${f}`, 'utf8'));
+    assert.ok(msg.text.includes('Manage your account / Správa účtu: https://supplierwatch.cz/manage?t=m'));
+});
